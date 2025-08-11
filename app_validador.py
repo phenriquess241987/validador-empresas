@@ -345,6 +345,8 @@ with aba4:
     st.markdown('<div class="crm-container">', unsafe_allow_html=True)
     colunas = st.columns(len(status_list), gap="medium")
 
+    precisa_rerun = False
+
     def atualizar_status(id_, novo_status):
         cursor.execute("UPDATE empresas SET crm_status=%s WHERE id=%s", (novo_status, id_))
         conn.commit()
@@ -367,12 +369,12 @@ with aba4:
                     if st.button("⬅️", key=f"voltar_{empresa['id']}") and status != status_list[0]:
                         idx = status_list.index(status)
                         atualizar_status(empresa["id"], status_list[idx - 1])
-                        st.session_state["crm_atualizado"] = True
+                        precisa_rerun = True
                 with col_move[2]:
                     if st.button("➡️", key=f"avancar_{empresa['id']}") and status != status_list[-1]:
                         idx = status_list.index(status)
                         atualizar_status(empresa["id"], status_list[idx + 1])
-                        st.session_state["crm_atualizado"] = True
+                        precisa_rerun = True
 
                 notas = st.text_area("Notas", value=empresa['crm_notas'], key=f"notas_{empresa['id']}")
                 data_contato = st.date_input(
@@ -384,8 +386,11 @@ with aba4:
                 if st.button("Salvar", key=f"salvar_{empresa['id']}"):
                     salvar_notas(empresa["id"], notas, data_contato)
                     st.success("Atualizado!")
-                    st.session_state["crm_atualizado"] = True
+                    precisa_rerun = True
 
                 st.markdown("---")
 
     st.markdown('</div>', unsafe_allow_html=True)
+
+    if precisa_rerun:
+        st.experimental_rerun()
