@@ -7,3 +7,4 @@ matplotlib
 streamlit-autorefress
 gspread
 oauth2client
+streamlit-aggrid
