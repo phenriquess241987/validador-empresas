@@ -52,6 +52,7 @@ st.set_page_config(page_title="Validador de CNPJs", layout="wide")
 st.title("🔍 Validador de CNPJs com ReceitaWS + Banco Neon")
 aba1, aba2, aba3 = st.tabs(["📤 Validação", "📊 Dashboard", "📦 Histórico"])
 
+# 📤 Aba 1: Validação
 with aba1:
     st.subheader("📤 Validação de CNPJs")
 
@@ -179,6 +180,7 @@ with aba1:
         if st.session_state.indice_lote >= total:
             st.success("🎉 Validação concluída!")
 
+# 📊 Aba 2: Dashboard
 with aba2:
     st.subheader("📊 Dashboard de Situação dos CNPJs")
 
@@ -199,6 +201,7 @@ with aba2:
     else:
         st.info("Nenhum dado encontrado no banco ainda.")
 
+# 📦 Aba 3: Histórico
 with aba3:
     st.subheader("📦 Histórico de registros salvos no banco Neon")
 
@@ -217,4 +220,10 @@ with aba3:
         if dados:
             df_banco = pd.DataFrame(dados, columns=["CNPJ", "Nome", "Telefone", "Situação RF", "Data"])
 
-            situacoes = st.multiselect("📌 Filtrar
+            situacoes = st.multiselect("📌 Filtrar por situação RF", options=df_banco["Situação RF"].unique())
+            if situacoes:
+                df_banco = df_banco[df_banco["Situação RF"].isin(situacoes)]
+
+            st.dataframe(df_banco)
+
+            csv = df_banco.to_csv(index=False
