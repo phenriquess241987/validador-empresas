@@ -222,3 +222,4 @@ with aba3:
         gb = GridOptionsBuilder.from_dataframe(df_banco)
         gb.configure_pagination()
         gb.configure_default_column(groupable=True, value=True, editable
+
