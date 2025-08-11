@@ -183,36 +183,30 @@ with aba2:
     df_crm = pd.DataFrame(dados_crm, columns=["CRM Status"]) if dados_crm else pd.DataFrame(columns=["CRM Status"])
     contagem_crm = df_crm["CRM Status"].value_counts()
 
-    # Layout: duas linhas
-    st.markdown("### Situação RF e CRM")
-    row1_col1, row1_col2 = st.columns([1, 3])
-    row2_col1, row2_col2 = st.columns(2)
+    # Quatro colunas iguais lado a lado
+    col1, col2, col3, col4 = st.columns(4)
 
-    # Linha 1, esquerda: gráfico barras situação RF estreito
-    with row1_col1:
+    with col1:
         st.write("📊 Situação RF (Barras)")
         st.bar_chart(contagem_rf)
 
-    # Linha 1, direita: gráfico pizza situação RF
-    with row1_col2:
-        st.write("🍰 Situação RF (Pizza)")
-        fig1, ax1 = plt.subplots()
-        ax1.pie(contagem_rf, labels=contagem_rf.index, autopct="%1.1f%%", startangle=90)
-        ax1.axis("equal")
-        st.pyplot(fig1, use_container_width=True)
-
-    # Linha 2, esquerda: tabela distribuição situação RF
-    with row2_col1:
+    with col2:
         st.write("📋 Distribuição das situações RF")
-        st.dataframe(contagem_rf.to_frame().rename(columns={"Situação RF":"Quantidade"}))
+        st.dataframe(contagem_rf.to_frame().rename(columns={"Situação RF": "Quantidade"}))
 
-    # Linha 2, direita: gráfico pizza CRM status
-    with row2_col2:
+    with col3:
         st.write("📊 Distribuição CRM Status")
-        fig2, ax2 = plt.subplots()
-        ax2.pie(contagem_crm, labels=contagem_crm.index, autopct="%1.1f%%", startangle=90)
-        ax2.axis("equal")
-        st.pyplot(fig2, use_container_width=True)
+        fig_crm, ax_crm = plt.subplots(figsize=(3, 3))
+        ax_crm.pie(contagem_crm, labels=contagem_crm.index, autopct="%1.1f%%", startangle=90)
+        ax_crm.axis("equal")
+        st.pyplot(fig_crm, use_container_width=True)
+
+    with col4:
+        st.write("🍰 Situação RF (Pizza)")
+        fig_rf, ax_rf = plt.subplots(figsize=(3, 3))
+        ax_rf.pie(contagem_rf, labels=contagem_rf.index, autopct="%1.1f%%", startangle=90)
+        ax_rf.axis("equal")
+        st.pyplot(fig_rf, use_container_width=True)
 
 # --- Aba 3: Histórico / CRM Simplificado ---
 with aba3:
@@ -262,16 +256,16 @@ with aba3:
                 st.markdown(f"**{empresa['nome']}** ({empresa['cnpj']})")
                 st.write(f"Telefone: {empresa['telefone']}")
                 st.write(f"Situação RF: {empresa['situacao_rf']}")
-                col_move = st.columns([1,2,1])
+                col_move = st.columns([1, 2, 1])
                 with col_move[0]:
                     if st.button("⬅️", key=f"voltar_{empresa['id']}") and status != status_list[0]:
                         idx = status_list.index(status)
-                        atualizar_status(empresa["id"], status_list[idx-1])
+                        atualizar_status(empresa["id"], status_list[idx - 1])
                         st.session_state["needs_rerun"] = True
                 with col_move[2]:
                     if st.button("➡️", key=f"avancar_{empresa['id']}") and status != status_list[-1]:
                         idx = status_list.index(status)
-                        atualizar_status(empresa["id"], status_list[idx+1])
+                        atualizar_status(empresa["id"], status_list[idx + 1])
                         st.session_state["needs_rerun"] = True
                 notas = st.text_area("Notas", value=empresa['crm_notas'], key=f"notas_{empresa['id']}")
                 data_contato = st.date_input(
