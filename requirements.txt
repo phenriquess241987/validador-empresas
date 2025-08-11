@@ -4,7 +4,6 @@ requests
 openpyxl
 psycopg2-binary
 matplotlib
-streamlit-autorefress
 gspread
 oauth2client
 streamlit-aggrid
