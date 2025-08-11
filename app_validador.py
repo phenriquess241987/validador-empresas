@@ -49,75 +49,73 @@ with aba1:
     st.subheader("📤 Validação de CNPJs")
     arquivo = st.file_uploader("📄 Envie sua planilha com CNPJs, Nomes e Telefones", type=["xlsx", "csv"])
 
-    if "validando" not in st.session_state:
-        st.session_state.validando = False
-    if "resultado_df" not in st.session_state:
-        st.session_state.resultado_df = None
+    if "df_validacao" not in st.session_state:
+        st.session_state.df_validacao = None
+    if "indice_lote" not in st.session_state:
+        st.session_state.indice_lote = 0
 
-    if arquivo and not st.session_state.validando:
+    if arquivo and st.session_state.df_validacao is None:
         df = pd.read_excel(arquivo) if arquivo.name.endswith(".xlsx") else pd.read_csv(arquivo)
-        st.write("📋 Empresas carregadas:", df.shape[0])
+        st.session_state.df_validacao = df
+        st.session_state.indice_lote = 0
+        st.success("📋 Planilha carregada com sucesso!")
 
-        if st.button("🚀 Iniciar validação e salvar no banco"):
-            st.session_state.validando = True
+    df_validacao = st.session_state.df_validacao
+
+    if df_validacao is not None:
+        total = len(df_validacao)
+        st.write(f"📦 Total de empresas: {total}")
+        progresso = st.progress(st.session_state.indice_lote / total)
+
+        if st.button("✅ Validar próximo lote"):
             resultados = []
-            total = len(df)
-            progresso = st.progress(0)
+            i = st.session_state.indice_lote
+            lote = df_validacao.iloc[i:i+3]
 
-            for i in range(0, total, 3):
-                lote = df.iloc[i:i+3]
-                for idx, row in lote.iterrows():
-                    cnpj = row["CNPJ"]
-                    nome = row.get("Nome", "")
-                    telefone = row.get("Telefone", "")
+            for idx, row in lote.iterrows():
+                cnpj = row["CNPJ"]
+                nome = row.get("Nome", "")
+                telefone = row.get("Telefone", "")
 
-                    # Verificar se já existe no banco
-                    cursor.execute("SELECT situacao_rf FROM empresas WHERE cnpj = %s", (cnpj,))
-                    resultado_existente = cursor.fetchone()
+                cursor.execute("SELECT situacao_rf FROM empresas WHERE cnpj = %s", (cnpj,))
+                resultado_existente = cursor.fetchone()
 
-                    if resultado_existente:
-                        situacao = resultado_existente[0]
-                        st.write(f"🔁 {cnpj}: já registrado como '{situacao}'")
-                    else:
-                        situacao = consultar_cnpj(cnpj)
-                        time.sleep(5)
+                if resultado_existente:
+                    situacao = resultado_existente[0]
+                    st.write(f"🔁 {cnpj}: já registrado como '{situacao}'")
+                else:
+                    situacao = consultar_cnpj(cnpj)
+                    time.sleep(5)
 
-                        cursor.execute("""
-                            INSERT INTO empresas (cnpj, nome, telefone, situacao_rf, created_at)
-                            VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
-                        """, (cnpj, nome, telefone, situacao))
-                        conn.commit()
+                    cursor.execute("""
+                        INSERT INTO empresas (cnpj, nome, telefone, situacao_rf, created_at)
+                        VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    """, (cnpj, nome, telefone, situacao))
+                    conn.commit()
 
-                        st.write(f"✅ {cnpj}: {situacao}")
+                    st.write(f"✅ {cnpj}: {situacao}")
 
-                    resultados.append({
-                        "CNPJ": cnpj,
-                        "Nome": nome,
-                        "Telefone": telefone,
-                        "Situação RF": situacao
-                    })
+                resultados.append({
+                    "CNPJ": cnpj,
+                    "Nome": nome,
+                    "Telefone": telefone,
+                    "Situação RF": situacao
+                })
 
-                    progresso.progress(min((len(resultados) / total), 1.0))
+            st.session_state.indice_lote += 3
+            progresso.progress(min(st.session_state.indice_lote / total, 1.0))
 
-                st.info("⏳ Aguardando 3 minutos para o próximo lote...")
-                time.sleep(180)
-
-            st.success("🎉 Validação concluída e dados salvos no banco!")
-            resultado_df = pd.DataFrame(resultados)
-            st.session_state.resultado_df = resultado_df
-            st.session_state.validando = False
-            st.dataframe(resultado_df)
-
-    elif st.session_state.validando:
-        st.warning("⏳ Validação em andamento... não altere de aba até concluir.")
-    elif st.session_state.resultado_df is not None:
-        st.dataframe(st.session_state.resultado_df)
+        if st.session_state.indice_lote >= total:
+            st.success("🎉 Validação concluída!")
 
 with aba2:
     st.subheader("📊 Dashboard de Situação dos CNPJs")
-    if st.session_state.resultado_df is not None:
-        df_resultado = st.session_state.resultado_df
-        contagem = df_resultado["Situação RF"].value_counts()
+
+    cursor.execute("SELECT situacao_rf FROM empresas")
+    dados = cursor.fetchall()
+    if dados:
+        df_dashboard = pd.DataFrame(dados, columns=["Situação RF"])
+        contagem = df_dashboard["Situação RF"].value_counts()
 
         st.bar_chart(contagem)
 
@@ -128,7 +126,7 @@ with aba2:
 
         st.write("📋 Distribuição das situações:", contagem)
     else:
-        st.info("⚠️ Realize uma validação primeiro para visualizar o dashboard.")
+        st.info("Nenhum dado encontrado no banco ainda.")
 
 with aba3:
     st.subheader("📦 Histórico de registros salvos no banco Neon")
@@ -149,11 +147,9 @@ with aba3:
             df_banco = pd.DataFrame(dados, columns=["CNPJ", "Nome", "Telefone", "Situação RF", "Data"])
             st.dataframe(df_banco)
 
-            # 📥 CSV
             csv = df_banco.to_csv(index=False).encode('utf-8')
             st.download_button("📥 Baixar como CSV", data=csv, file_name="empresas_salvas.csv", mime="text/csv")
 
-            # 📤 Excel
             excel_buffer = io.BytesIO()
             with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
                 df_banco.to_excel(writer, index=False, sheet_name="Empresas")
