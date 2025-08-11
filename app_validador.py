@@ -217,4 +217,4 @@ with aba3:
         if dados:
             df_banco = pd.DataFrame(dados, columns=["CNPJ", "Nome", "Telefone", "Situação RF", "Data"])
 
-            situacoes = st.multiselect("📌 Filtrar por situação RF
+            situacoes = st.multiselect("📌
