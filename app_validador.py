@@ -2,8 +2,25 @@ import streamlit as st
 import pandas as pd
 import requests
 import time
+import psycopg2
 
-# Função para consultar CNPJ na ReceitaWS
+# 🔌 Conectar ao banco Neon via secrets
+conn = psycopg2.connect(st.secrets["database"]["url"])
+cursor = conn.cursor()
+
+# 🧱 Criar tabela se não existir
+cursor.execute("""
+    CREATE TABLE IF NOT EXISTS empresas (
+        id SERIAL PRIMARY KEY,
+        cnpj TEXT,
+        nome TEXT,
+        telefone TEXT,
+        situacao_rf TEXT
+    );
+""")
+conn.commit()
+
+# 🔍 Função para consultar CNPJ na ReceitaWS
 def consultar_cnpj(cnpj):
     cnpj = ''.join(filter(str.isdigit, str(cnpj)))
     url = f"https://www.receitaws.com.br/v1/cnpj/{cnpj}"
@@ -19,30 +36,44 @@ def consultar_cnpj(cnpj):
     except Exception as e:
         return f"Erro: {str(e)}"
 
-# Interface Streamlit
-st.title("🔍 Validador de CNPJs com ReceitaWS")
-arquivo = st.file_uploader("📄 Envie sua planilha com CNPJs", type=["xlsx", "csv"])
+# 🖥️ Interface Streamlit
+st.title("🔍 Validador de CNPJs com ReceitaWS + Banco Neon")
+arquivo = st.file_uploader("📄 Envie sua planilha com CNPJs, Nomes e Telefones", type=["xlsx", "csv"])
 
 if arquivo:
     df = pd.read_excel(arquivo) if arquivo.name.endswith(".xlsx") else pd.read_csv(arquivo)
     st.write("📋 Empresas carregadas:", df.shape[0])
     
-    if st.button("🚀 Iniciar validação em tempo real"):
+    if st.button("🚀 Iniciar validação e salvar no banco"):
         resultados = []
         total = len(df)
         for i in range(0, total, 3):
             lote = df.iloc[i:i+3]
             for idx, row in lote.iterrows():
                 cnpj = row["CNPJ"]
+                nome = row.get("Nome", "")
+                telefone = row.get("Telefone", "")
                 situacao = consultar_cnpj(cnpj)
-                resultados.append({"CNPJ": cnpj, "Situação": situacao})
+
+                resultados.append({
+                    "CNPJ": cnpj,
+                    "Nome": nome,
+                    "Telefone": telefone,
+                    "Situação RF": situacao
+                })
+
+                # 💾 Inserir no banco Neon
+                cursor.execute("""
+                    INSERT INTO empresas (cnpj, nome, telefone, situacao_rf)
+                    VALUES (%s, %s, %s, %s)
+                """, (cnpj, nome, telefone, situacao))
+                conn.commit()
+
                 st.write(f"✅ {cnpj}: {situacao}")
             
-            st.info(f"⏳ Aguardando 3 minutos para o próximo lote...")
-            time.sleep(180)  # Espera 3 minutos
+            st.info("⏳ Aguardando 3 minutos para o próximo lote...")
+            time.sleep(180)
 
-        st.success("🎉 Validação concluída!")
+        st.success("🎉 Validação concluída e dados salvos no banco!")
         resultado_df = pd.DataFrame(resultados)
         st.dataframe(resultado_df)
-
-
