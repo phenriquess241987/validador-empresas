@@ -77,3 +77,26 @@ if arquivo:
         st.success("🎉 Validação concluída e dados salvos no banco!")
         resultado_df = pd.DataFrame(resultados)
         st.dataframe(resultado_df)
+
+# 📦 Consulta dos dados salvos
+st.markdown("---")
+st.subheader("📦 Consultar dados salvos no banco Neon")
+
+if st.button("🔎 Ver registros salvos"):
+    cursor.execute("SELECT cnpj, nome, telefone, situacao_rf FROM empresas ORDER BY id DESC")
+    dados = cursor.fetchall()
+
+    if dados:
+        df_banco = pd.DataFrame(dados, columns=["CNPJ", "Nome", "Telefone", "Situação RF"])
+        st.dataframe(df_banco)
+
+        # 📥 Botão para baixar como CSV
+        csv = df_banco.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Baixar registros como CSV",
+            data=csv,
+            file_name="empresas_salvas.csv",
+            mime="text/csv"
+        )
+    else:
+        st.info("Nenhum dado encontrado no banco ainda.")
