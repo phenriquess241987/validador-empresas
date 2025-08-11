@@ -223,6 +223,4 @@ with aba3:
 
             st.dataframe(df_banco)
 
-            csv = df_banco.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥
+            csv = df_b
