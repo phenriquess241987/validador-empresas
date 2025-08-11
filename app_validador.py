@@ -187,36 +187,66 @@ with aba2:
         st.info("Nenhum dado encontrado no banco ainda.")
 
 with aba3:
-    st.subheader("📦 Histórico de registros salvos no banco Neon")
+    from st_aggrid import AgGrid, GridOptionsBuilder
 
-    data_inicio = st.date_input("📅 Data inicial", value=date(2024, 1, 1))
-    data_fim = st.date_input("📅 Data final", value=date.today())
+with aba3:
+    st.subheader("📦 CRM Visual - Histórico de registros")
 
-    if st.button("🔎 Buscar registros por data"):
-        cursor.execute("""
-            SELECT cnpj, nome, telefone, situacao_rf, created_at
-            FROM empresas
-            WHERE DATE(created_at) BETWEEN %s AND %s
-            ORDER BY id DESC
-        """, (data_inicio, data_fim))
-        dados = cursor.fetchall()
+    # 🔍 Filtros avançados
+    st.markdown("### 🔎 Filtros")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        nome_filtro = st.text_input("Filtrar por Nome")
+    with col2:
+        cnpj_filtro = st.text_input("Filtrar por CNPJ")
+    with col3:
+        situacao_filtro = st.selectbox("Situação RF", ["", "ATIVA", "INAPTA", "BAIXADA", "SUSPENSA"])
 
-        if dados:
-            df_banco = pd.DataFrame(dados, columns=["CNPJ", "Nome", "Telefone", "Situação RF", "Data"])
-            st.dataframe(df_banco)
+    col4, col5 = st.columns(2)
+    with col4:
+        data_inicio = st.date_input("📅 Data inicial", value=date(2024, 1, 1))
+    with col5:
+        data_fim = st.date_input("📅 Data final", value=date.today())
 
-            csv = df_banco.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 Baixar como CSV", data=csv, file_name="empresas_salvas.csv", mime="text/csv")
+    # 🔎 Buscar registros filtrados
+    cursor.execute("""
+        SELECT cnpj, nome, telefone, situacao_rf, created_at
+        FROM empresas
+        WHERE DATE(created_at) BETWEEN %s AND %s
+        ORDER BY id DESC
+    """, (data_inicio, data_fim))
+    dados = cursor.fetchall()
 
-            excel_buffer = io.BytesIO()
-            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                df_banco.to_excel(writer, index=False, sheet_name="Empresas")
-            st.download_button("📥 Baixar como Excel", data=excel_buffer.getvalue(),
-                               file_name="empresas_salvas.xlsx",
-                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        else:
-            st.info("Nenhum dado encontrado nesse intervalo.")
+    if dados:
+        df_banco = pd.DataFrame(dados, columns=["CNPJ", "Nome", "Telefone", "Situação RF", "Data"])
 
+        # Aplicar filtros adicionais
+        if nome_filtro:
+            df_banco = df_banco[df_banco["Nome"].str.contains(nome_filtro, case=False, na=False)]
+        if cnpj_filtro:
+            df_banco = df_banco[df_banco["CNPJ"].str.contains(cnpj_filtro, na=False)]
+        if situacao_filtro:
+            df_banco = df_banco[df_banco["Situação RF"] == situacao_filtro]
 
+        # 📊 Tabela interativa com AgGrid
+        st.markdown("### 📋 Resultados")
+        gb = GridOptionsBuilder.from_dataframe(df_banco)
+        gb.configure_pagination()
+        gb.configure_default_column(groupable=True, value=True, editable=False)
+        grid_options = gb.build()
 
+        AgGrid(df_banco, gridOptions=grid_options, height=400, theme="material")
 
+        # 📥 Exportação
+        st.markdown("### 📤 Exportar dados filtrados")
+        csv = df_banco.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Baixar como CSV", data=csv, file_name="empresas_filtradas.csv", mime="text/csv")
+
+        excel_buffer = io.BytesIO()
+        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+            df_banco.to_excel(writer, index=False, sheet_name="Empresas")
+        st.download_button("📥 Baixar como Excel", data=excel_buffer.getvalue(),
+                           file_name="empresas_filtradas.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    else:
+        st.info("Nenhum dado encontrado nesse intervalo.")
