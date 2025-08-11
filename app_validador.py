@@ -46,23 +46,49 @@ st.title("🔍 Validador de CNPJs com ReceitaWS + Banco Neon")
 aba1, aba2, aba3 = st.tabs(["📤 Validação", "📊 Dashboard", "📦 Histórico"])
 
 with aba1:
+    st.subheader("📤 Validação de CNPJs")
     arquivo = st.file_uploader("📄 Envie sua planilha com CNPJs, Nomes e Telefones", type=["xlsx", "csv"])
-    resultado_df = None
 
-    if arquivo:
+    if "validando" not in st.session_state:
+        st.session_state.validando = False
+    if "resultado_df" not in st.session_state:
+        st.session_state.resultado_df = None
+
+    if arquivo and not st.session_state.validando:
         df = pd.read_excel(arquivo) if arquivo.name.endswith(".xlsx") else pd.read_csv(arquivo)
         st.write("📋 Empresas carregadas:", df.shape[0])
-        
+
         if st.button("🚀 Iniciar validação e salvar no banco"):
+            st.session_state.validando = True
             resultados = []
             total = len(df)
+            progresso = st.progress(0)
+
             for i in range(0, total, 3):
                 lote = df.iloc[i:i+3]
                 for idx, row in lote.iterrows():
                     cnpj = row["CNPJ"]
                     nome = row.get("Nome", "")
                     telefone = row.get("Telefone", "")
-                    situacao = consultar_cnpj(cnpj)
+
+                    # Verificar se já existe no banco
+                    cursor.execute("SELECT situacao_rf FROM empresas WHERE cnpj = %s", (cnpj,))
+                    resultado_existente = cursor.fetchone()
+
+                    if resultado_existente:
+                        situacao = resultado_existente[0]
+                        st.write(f"🔁 {cnpj}: já registrado como '{situacao}'")
+                    else:
+                        situacao = consultar_cnpj(cnpj)
+                        time.sleep(5)
+
+                        cursor.execute("""
+                            INSERT INTO empresas (cnpj, nome, telefone, situacao_rf, created_at)
+                            VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        """, (cnpj, nome, telefone, situacao))
+                        conn.commit()
+
+                        st.write(f"✅ {cnpj}: {situacao}")
 
                     resultados.append({
                         "CNPJ": cnpj,
@@ -71,27 +97,26 @@ with aba1:
                         "Situação RF": situacao
                     })
 
-                    # 💾 Inserir no banco Neon
-                    cursor.execute("""
-                        INSERT INTO empresas (cnpj, nome, telefone, situacao_rf, created_at)
-                        VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
-                    """, (cnpj, nome, telefone, situacao))
-                    conn.commit()
+                    progresso.progress(min((len(resultados) / total), 1.0))
 
-                    st.write(f"✅ {cnpj}: {situacao}")
-                
                 st.info("⏳ Aguardando 3 minutos para o próximo lote...")
                 time.sleep(180)
 
             st.success("🎉 Validação concluída e dados salvos no banco!")
             resultado_df = pd.DataFrame(resultados)
-            st.session_state["resultado_df"] = resultado_df
+            st.session_state.resultado_df = resultado_df
+            st.session_state.validando = False
             st.dataframe(resultado_df)
+
+    elif st.session_state.validando:
+        st.warning("⏳ Validação em andamento... não altere de aba até concluir.")
+    elif st.session_state.resultado_df is not None:
+        st.dataframe(st.session_state.resultado_df)
 
 with aba2:
     st.subheader("📊 Dashboard de Situação dos CNPJs")
-    if "resultado_df" in st.session_state:
-        df_resultado = st.session_state["resultado_df"]
+    if st.session_state.resultado_df is not None:
+        df_resultado = st.session_state.resultado_df
         contagem = df_resultado["Situação RF"].value_counts()
 
         st.bar_chart(contagem)
