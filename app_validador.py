@@ -7,11 +7,41 @@ import io
 from datetime import date
 import matplotlib.pyplot as plt
 
+# --- CSS para fixar abas no topo e ajustar conteúdo ---
+st.markdown(
+    """
+    <style>
+    /* Fixar barra de abas no topo */
+    div[data-testid="stHorizontalBlock"] {
+        position: sticky;
+        top: 0;
+        z-index: 999;
+        background-color: white;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid #eee;
+    }
+    /* Espaço para conteúdo não ficar por baixo da barra fixa */
+    section.main > div.block-container {
+        margin-top: 70px;
+    }
+    /* Container CRM com scroll horizontal */
+    .crm-container {
+        display: flex;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        gap: 20px;
+        padding-bottom: 10px;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 # --- Conexão com banco ---
 conn = psycopg2.connect(st.secrets["database"]["url"])
 cursor = conn.cursor()
 
-# --- Inicializa tabela e colunas CRM ---
 def inicializar_banco():
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS empresas (
@@ -70,7 +100,8 @@ def contagem_regressiva(segundos):
 st.set_page_config(page_title="Validador + CRM Simplificado", layout="wide")
 st.title("🔍 Validador de CNPJs + CRM Simplificado")
 
-aba1, aba2, aba3 = st.tabs(["📤 Validação", "📊 Dashboard", "📦 Histórico / CRM"])
+# --- Cria 4 abas ---
+aba1, aba2, aba3, aba4 = st.tabs(["📤 Validação", "📊 Dashboard", "📦 Histórico", "🗂 CRM"])
 
 # --- Aba 1: Validação ---
 with aba1:
@@ -183,7 +214,7 @@ with aba2:
     df_crm = pd.DataFrame(dados_crm, columns=["CRM Status"]) if dados_crm else pd.DataFrame(columns=["CRM Status"])
     contagem_crm = df_crm["CRM Status"].value_counts()
 
-    # Quatro colunas iguais lado a lado
+    # Quatro colunas lado a lado
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
@@ -208,9 +239,31 @@ with aba2:
         ax_rf.axis("equal")
         st.pyplot(fig_rf, use_container_width=True)
 
-# --- Aba 3: Histórico / CRM Simplificado ---
+# --- Aba 3: Histórico ---
 with aba3:
-    st.subheader("📦 Histórico / CRM Simplificado")
+    st.subheader("📦 Histórico de empresas validadas")
+
+    data_inicio = st.date_input("📅 Data inicial", value=date(2024, 1, 1))
+    data_fim = st.date_input("📅 Data final", value=date.today())
+
+    if st.button("🔎 Buscar registros por data"):
+        cursor.execute("""
+            SELECT cnpj, nome, telefone, situacao_rf, created_at
+            FROM empresas
+            WHERE DATE(created_at) BETWEEN %s AND %s
+            ORDER BY id DESC
+        """, (data_inicio, data_fim))
+        dados = cursor.fetchall()
+
+        if dados:
+            df_banco = pd.DataFrame(dados, columns=["CNPJ", "Nome", "Telefone", "Situação RF", "Data"])
+            st.dataframe(df_banco)
+        else:
+            st.info("Nenhum dado encontrado no período selecionado.")
+
+# --- Aba 4: CRM Simplificado ---
+with aba4:
+    st.subheader("🗂 CRM Simplificado")
 
     status_list = ["Prospect", "Em Negociação", "Cliente", "Perdido"]
 
@@ -236,8 +289,8 @@ with aba3:
             "proximo_contato": proximo_contato.strftime("%Y-%m-%d") if proximo_contato else "",
         })
 
-    col1, col2, col3, col4 = st.columns(4)
-    colunas = [col1, col2, col3, col4]
+    st.markdown('<div class="crm-container">', unsafe_allow_html=True)
+    colunas = st.columns(len(status_list), gap="medium")
 
     def atualizar_status(id_, novo_status):
         cursor.execute("UPDATE empresas SET crm_status=%s WHERE id=%s", (novo_status, id_))
@@ -278,8 +331,9 @@ with aba3:
                     st.success("Atualizado!")
                     st.session_state["needs_rerun"] = True
                 st.markdown("---")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-# --- Controle seguro do rerun ---
+# --- Rerun control ---
 if st.session_state.get("needs_rerun", False):
     st.session_state["needs_rerun"] = False
     st.experimental_rerun()
