@@ -7,7 +7,7 @@ import io
 from datetime import date
 import matplotlib.pyplot as plt
 
-# --- CSS para fixar abas no topo e ajustar conteúdo ---
+# --- CSS para fixar abas no topo, ajustar tema escuro e CRM ---
 st.markdown(
     """
     <style>
@@ -16,10 +16,10 @@ st.markdown(
         position: sticky;
         top: 0;
         z-index: 999;
-        background-color: white;
+        background-color: #111;
         padding-top: 10px;
         padding-bottom: 10px;
-        border-bottom: 1px solid #eee;
+        border-bottom: 1px solid #333;
     }
     /* Espaço para conteúdo não ficar por baixo da barra fixa */
     section.main > div.block-container {
@@ -33,10 +33,54 @@ st.markdown(
         gap: 20px;
         padding-bottom: 10px;
     }
+    /* Para inputs, botões, texto e áreas de texto no modo escuro */
+    .stButton > button {
+        background-color: #333 !important;
+        color: #eee !important;
+        border: 1px solid #555 !important;
+    }
+    .stButton > button:hover {
+        background-color: #555 !important;
+    }
+    textarea, input, .stTextInput > div > input {
+        background-color: #222 !important;
+        color: #eee !important;
+        border: 1px solid #555 !important;
+    }
+    /* Fundo das colunas CRM */
+    .crm-container > div {
+        background-color: #222 !important;
+        color: #eee !important;
+        padding: 10px;
+        border-radius: 8px;
+        border: 1px solid #444;
+    }
+    /* Fundo das barras de progresso */
+    div[role="progressbar"] > div {
+        background-color: #0d6efd !important;
+    }
+    /* Ajuste para data_input para tema escuro */
+    .stDateInput > div > div > input {
+        background-color: #222 !important;
+        color: #eee !important;
+        border: 1px solid #555 !important;
+    }
+    /* Fundo das tabelas e dataframes */
+    .dataframe-container, .stDataFrame, .stTable {
+        background-color: #121212 !important;
+        color: #eee !important;
+    }
+    /* Fundo dos charts (matplotlib) para tema escuro */
+    .element-container svg {
+        background-color: transparent !important;
+    }
     </style>
     """,
     unsafe_allow_html=True
 )
+
+# --- Forçar matplotlib em tema escuro ---
+plt.style.use('dark_background')
 
 # --- Conexão com banco ---
 conn = psycopg2.connect(st.secrets["database"]["url"])
@@ -100,10 +144,9 @@ def contagem_regressiva(segundos):
 st.set_page_config(page_title="Validador + CRM Simplificado", layout="wide")
 st.title("🔍 Validador de CNPJs + CRM Simplificado")
 
-# --- Cria 4 abas ---
 aba1, aba2, aba3, aba4 = st.tabs(["📤 Validação", "📊 Dashboard", "📦 Histórico", "🗂 CRM"])
 
-# --- Aba 1: Validação ---
+# Aba 1: Validação
 with aba1:
     st.subheader("📤 Validação de CNPJs")
     modelo_df = pd.DataFrame({"CNPJ": ["00000000000000"], "Nome": ["Empresa Exemplo"], "Telefone": ["(00) 00000-0000"]})
@@ -198,23 +241,20 @@ with aba1:
         if st.session_state.indice_lote >= total:
             st.success("🎉 Validação concluída!")
 
-# --- Aba 2: Dashboard ---
+# Aba 2: Dashboard
 with aba2:
     st.subheader("📊 Dashboard de Situação dos CNPJs")
 
-    # Dados situação RF
     cursor.execute("SELECT situacao_rf FROM empresas")
     dados_rf = cursor.fetchall()
     df_rf = pd.DataFrame(dados_rf, columns=["Situação RF"]) if dados_rf else pd.DataFrame(columns=["Situação RF"])
     contagem_rf = df_rf["Situação RF"].value_counts()
 
-    # Dados CRM
     cursor.execute("SELECT crm_status FROM empresas")
     dados_crm = cursor.fetchall()
     df_crm = pd.DataFrame(dados_crm, columns=["CRM Status"]) if dados_crm else pd.DataFrame(columns=["CRM Status"])
     contagem_crm = df_crm["CRM Status"].value_counts()
 
-    # Quatro colunas lado a lado
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
@@ -239,7 +279,7 @@ with aba2:
         ax_rf.axis("equal")
         st.pyplot(fig_rf, use_container_width=True)
 
-# --- Aba 3: Histórico ---
+# Aba 3: Histórico
 with aba3:
     st.subheader("📦 Histórico de empresas validadas")
 
@@ -261,7 +301,7 @@ with aba3:
         else:
             st.info("Nenhum dado encontrado no período selecionado.")
 
-# --- Aba 4: CRM Simplificado ---
+# Aba 4: CRM Simplificado
 with aba4:
     st.subheader("🗂 CRM Simplificado")
 
@@ -333,7 +373,6 @@ with aba4:
                 st.markdown("---")
     st.markdown('</div>', unsafe_allow_html=True)
 
-# --- Rerun control ---
 if st.session_state.get("needs_rerun", False):
     st.session_state["needs_rerun"] = False
     st.experimental_rerun()
