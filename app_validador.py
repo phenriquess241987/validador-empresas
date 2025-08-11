@@ -1,51 +1,79 @@
 import streamlit as st
 import pandas as pd
-import io
+import requests
+import time
+import psycopg2
 
-st.set_page_config(page_title="Importador de Planilhas", layout="centered")
-st.title("📊 Importador de Dados Empresariais")
+# 🔌 Conectar ao banco Neon via secrets
+conn = psycopg2.connect(st.secrets["database"]["url"])
+cursor = conn.cursor()
 
-# 🔹 Instruções iniciais
-st.markdown("### 📎 Baixe a planilha modelo para garantir o formato correto")
-st.markdown("A planilha deve conter as colunas: **CNPJ**, **Nome**, **Telefone**")
+# 🧱 Criar tabela se não existir
+cursor.execute("""
+    CREATE TABLE IF NOT EXISTS empresas (
+        id SERIAL PRIMARY KEY,
+        cnpj TEXT,
+        nome TEXT,
+        telefone TEXT,
+        situacao_rf TEXT
+    );
+""")
+conn.commit()
 
-# 🔹 Gerar planilha modelo
-modelo_df = pd.DataFrame({
-    "CNPJ": ["00000000000000"],
-    "Nome": ["Empresa Exemplo"],
-    "Telefone": ["(00) 00000-0000"]
-})
-
-excel_buffer = io.BytesIO()
-with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-    modelo_df.to_excel(writer, index=False, sheet_name="Modelo")
-
-st.download_button(
-    label="📥 Baixar planilha modelo",
-    data=excel_buffer.getvalue(),
-    file_name="modelo_planilha.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-)
-
-# 🔹 Upload da planilha do usuário
-st.markdown("### 📤 Envie sua planilha preenchida")
-uploaded_file = st.file_uploader("Selecione o arquivo Excel (.xlsx)", type=["xlsx"])
-
-# 🔹 Validação da estrutura
-colunas_esperadas = ["CNPJ", "Nome", "Telefone"]
-
-if uploaded_file:
+# 🔍 Função para consultar CNPJ na ReceitaWS
+def consultar_cnpj(cnpj):
+    cnpj = ''.join(filter(str.isdigit, str(cnpj)))
+    url = f"https://www.receitaws.com.br/v1/cnpj/{cnpj}"
+    headers = {"Accept": "application/json"}
+    
     try:
-        df = pd.read_excel(uploaded_file)
-
-        # Verifica se todas as colunas esperadas estão presentes
-        if all(col in df.columns for col in colunas_esperadas):
-            st.success("✅ Planilha válida! Pronta para ser processada.")
-            st.dataframe(df)
-            # Aqui você pode incluir o código para salvar no banco de dados
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            dados = response.json()
+            return dados.get("situacao", "Não encontrado")
         else:
-            st.error("❌ Estrutura inválida. Certifique-se de que sua planilha contém as colunas: CNPJ, Nome, Telefone.")
-            st.write("Colunas encontradas:", list(df.columns))
-
+            return f"Erro {response.status_code}"
     except Exception as e:
-        st.error(f"Erro ao ler o arquivo: {e}")
+        return f"Erro: {str(e)}"
+
+# 🖥️ Interface Streamlit
+st.title("🔍 Validador de CNPJs com ReceitaWS + Banco Neon")
+arquivo = st.file_uploader("📄 Envie sua planilha com CNPJs, Nomes e Telefones", type=["xlsx", "csv"])
+
+if arquivo:
+    df = pd.read_excel(arquivo) if arquivo.name.endswith(".xlsx") else pd.read_csv(arquivo)
+    st.write("📋 Empresas carregadas:", df.shape[0])
+    
+    if st.button("🚀 Iniciar validação e salvar no banco"):
+        resultados = []
+        total = len(df)
+        for i in range(0, total, 3):
+            lote = df.iloc[i:i+3]
+            for idx, row in lote.iterrows():
+                cnpj = row["CNPJ"]
+                nome = row.get("Nome", "")
+                telefone = row.get("Telefone", "")
+                situacao = consultar_cnpj(cnpj)
+
+                resultados.append({
+                    "CNPJ": cnpj,
+                    "Nome": nome,
+                    "Telefone": telefone,
+                    "Situação RF": situacao
+                })
+
+                # 💾 Inserir no banco Neon
+                cursor.execute("""
+                    INSERT INTO empresas (cnpj, nome, telefone, situacao_rf)
+                    VALUES (%s, %s, %s, %s)
+                """, (cnpj, nome, telefone, situacao))
+                conn.commit()
+
+                st.write(f"✅ {cnpj}: {situacao}")
+            
+            st.info("⏳ Aguardando 3 minutos para o próximo lote...")
+            time.sleep(180)
+
+        st.success("🎉 Validação concluída e dados salvos no banco!")
+        resultado_df = pd.DataFrame(resultados)
+        st.dataframe(resultado_df)
