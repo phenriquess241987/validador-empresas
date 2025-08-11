@@ -44,3 +44,19 @@ if arquivo:
         st.success("🎉 Validação concluída!")
         resultado_df = pd.DataFrame(resultados)
         st.dataframe(resultado_df)
+
+#conectar ao banco de dados do neon.tech
+
+import streamlit as st
+import psycopg2
+
+# Conectar ao banco usando secrets
+conn = psycopg2.connect(st.secrets["database"]["url"])
+cursor = conn.cursor()
+
+# Teste simples
+cursor.execute("SELECT version();")
+versao = cursor.fetchone()
+st.write("Conectado ao banco Neon!")
+st.write("Versão do PostgreSQL:", versao)
+
