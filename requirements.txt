@@ -7,3 +7,4 @@ matplotlib
 gspread
 oauth2client
 streamlit-aggrid
+streamlit-sortables
