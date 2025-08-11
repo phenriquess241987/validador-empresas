@@ -47,7 +47,32 @@ aba1, aba2, aba3 = st.tabs(["📤 Validação", "📊 Dashboard", "📦 Históri
 
 with aba1:
     st.subheader("📤 Validação de CNPJs")
-    arquivo = st.file_uploader("📄 Envie sua planilha com CNPJs, Nomes e Telefones", type=["xlsx", "csv"])
+
+    # 📍 Instrução clara
+    st.markdown("### 📎 Baixe a planilha modelo para garantir o formato correto")
+    st.markdown("A planilha deve conter as colunas: **CNPJ**, **Nome**, **Telefone**")
+
+    # 📄 Gerar planilha modelo
+    modelo_df = pd.DataFrame({
+        "CNPJ": ["00000000000000"],
+        "Nome": ["Empresa Exemplo"],
+        "Telefone": ["(00) 00000-0000"]
+    })
+
+    excel_buffer = io.BytesIO()
+    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+        modelo_df.to_excel(writer, index=False, sheet_name="Modelo")
+
+    st.download_button(
+        label="📥 Baixar planilha modelo",
+        data=excel_buffer.getvalue(),
+        file_name="modelo_planilha.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+    # 📤 Upload da planilha
+    arquivo = st.file_uploader("📄 Envie sua planilha preenchida", type=["xlsx", "csv"])
+    colunas_esperadas = ["CNPJ", "Nome", "Telefone"]
 
     if "df_validacao" not in st.session_state:
         st.session_state.df_validacao = None
@@ -56,9 +81,42 @@ with aba1:
 
     if arquivo and st.session_state.df_validacao is None:
         df = pd.read_excel(arquivo) if arquivo.name.endswith(".xlsx") else pd.read_csv(arquivo)
-        st.session_state.df_validacao = df
-        st.session_state.indice_lote = 0
-        st.success("📋 Planilha carregada com sucesso!")
+
+        # ✅ Validação da estrutura
+        if all(col in df.columns for col in colunas_esperadas):
+            erros = []
+
+            # 🔍 Validação de formato
+            df["CNPJ"] = df["CNPJ"].astype(str).str.replace(r"\D", "", regex=True)
+            df["Telefone"] = df["Telefone"].astype(str)
+
+            for i, row in df.iterrows():
+                cnpj = row["CNPJ"]
+                telefone = row["Telefone"]
+
+                if not cnpj.isdigit() or len(cnpj) != 14:
+                    erros.append(f"Linha {i+2}: CNPJ inválido ({cnpj})")
+                if len(''.join(filter(str.isdigit, telefone))) < 11:
+                    erros.append(f"Linha {i+2}: Telefone inválido ({telefone})")
+
+            # 🚫 Verificar duplicidade de CNPJs
+            duplicados = df[df.duplicated(subset=["CNPJ"], keep=False)]
+            if not duplicados.empty:
+                erros.append("⚠️ CNPJs duplicados encontrados:")
+                for cnpj in duplicados["CNPJ"].unique():
+                    erros.append(f"- {cnpj}")
+
+            if erros:
+                st.error("❌ Erros encontrados na planilha:")
+                for erro in erros:
+                    st.write(erro)
+            else:
+                st.session_state.df_validacao = df
+                st.session_state.indice_lote = 0
+                st.success("📋 Planilha válida e carregada com sucesso!")
+        else:
+            st.error("❌ Estrutura inválida. Certifique-se de que sua planilha contém as colunas: CNPJ, Nome, Telefone.")
+            st.write("Colunas encontradas:", list(df.columns))
 
     df_validacao = st.session_state.df_validacao
 
@@ -153,8 +211,3 @@ with aba3:
             excel_buffer = io.BytesIO()
             with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
                 df_banco.to_excel(writer, index=False, sheet_name="Empresas")
-            st.download_button("📥 Baixar como Excel", data=excel_buffer.getvalue(),
-                               file_name="empresas_salvas.xlsx",
-                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        else:
-            st.info("Nenhum dado encontrado nesse intervalo.")
