@@ -8,3 +8,4 @@ gspread
 oauth2client
 streamlit-aggrid
 streamlit-sortables
+streamlit-autorefresh
