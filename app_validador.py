@@ -3,131 +3,38 @@ import pandas as pd
 import requests
 import time
 import psycopg2
-import io
-from datetime import date
 import matplotlib.pyplot as plt
+import io
+from openpyxl import Workbook
+from datetime import date
 
-# --- CSS para fixar abas no topo, ajustar tema escuro e CRM ---
-st.markdown(
-    """
-    <style>
-    /* Fixar barra de abas no topo */
-    div[data-testid="stHorizontalBlock"] {
-        position: sticky;
-        top: 0;
-        z-index: 999;
-        background-color: #111;
-        padding-top: 10px;
-        padding-bottom: 10px;
-        border-bottom: 1px solid #333;
-    }
-    /* Espaço para conteúdo não ficar por baixo da barra fixa */
-    section.main > div.block-container {
-        margin-top: 70px;
-    }
-    /* Container CRM com scroll horizontal */
-    .crm-container {
-        display: flex;
-        flex-wrap: nowrap;
-        overflow-x: auto;
-        gap: 20px;
-        padding-bottom: 10px;
-    }
-    /* Para inputs, botões, texto e áreas de texto no modo escuro */
-    .stButton > button {
-        background-color: #333 !important;
-        color: #eee !important;
-        border: 1px solid #555 !important;
-    }
-    .stButton > button:hover {
-        background-color: #555 !important;
-    }
-    textarea, input, .stTextInput > div > input {
-        background-color: #222 !important;
-        color: #eee !important;
-        border: 1px solid #555 !important;
-    }
-    /* Fundo das colunas CRM */
-    .crm-container > div {
-        background-color: #222 !important;
-        color: #eee !important;
-        padding: 10px;
-        border-radius: 8px;
-        border: 1px solid #444;
-    }
-    /* Fundo das barras de progresso */
-    div[role="progressbar"] > div {
-        background-color: #0d6efd !important;
-    }
-    /* Ajuste para data_input para tema escuro */
-    .stDateInput > div > div > input {
-        background-color: #222 !important;
-        color: #eee !important;
-        border: 1px solid #555 !important;
-    }
-    /* Fundo das tabelas e dataframes */
-    .dataframe-container, .stDataFrame, .stTable {
-        background-color: #121212 !important;
-        color: #eee !important;
-    }
-    /* Fundo dos charts (matplotlib) para tema escuro */
-    .element-container svg {
-        background-color: transparent !important;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+from streamlit_autorefresh import st_autorefresh  # <- nova dependência
 
-# --- Forçar matplotlib em tema escuro ---
-plt.style.use('dark_background')
-
-# --- Conexão com banco ---
+# 🔌 Conectar ao banco Neon via secrets
 conn = psycopg2.connect(st.secrets["database"]["url"])
 cursor = conn.cursor()
 
-def inicializar_banco():
-    cursor.execute("""
+# 🧱 Criar tabela se não existir (já com UNIQUE no cnpj para ON CONFLICT funcionar)
+cursor.execute("""
     CREATE TABLE IF NOT EXISTS empresas (
         id SERIAL PRIMARY KEY,
         cnpj TEXT UNIQUE,
         nome TEXT,
         telefone TEXT,
         situacao_rf TEXT,
-        crm_status TEXT DEFAULT 'Prospect',
-        crm_notas TEXT,
-        proximo_contato DATE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
-    """)
-    conn.commit()
+""")
+conn.commit()
 
-    for coluna, tipo, default in [
-        ("crm_status", "TEXT", "'Prospect'"),
-        ("crm_notas", "TEXT", "NULL"),
-        ("proximo_contato", "DATE", "NULL"),
-    ]:
-        cursor.execute(f"""
-        DO $$
-        BEGIN
-            IF NOT EXISTS (
-                SELECT 1 FROM information_schema.columns WHERE table_name='empresas' AND column_name='{coluna}'
-            ) THEN
-                ALTER TABLE empresas ADD COLUMN {coluna} {tipo} DEFAULT {default};
-            END IF;
-        END$$;
-        """)
-    conn.commit()
-
-inicializar_banco()
-
-@st.cache_data(show_spinner=False)
+# 🔍 Função para consultar CNPJ na ReceitaWS
 def consultar_cnpj(cnpj):
     cnpj = ''.join(filter(str.isdigit, str(cnpj)))
     url = f"https://www.receitaws.com.br/v1/cnpj/{cnpj}"
     headers = {"Accept": "application/json"}
+
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers)
         if response.status_code == 200:
             dados = response.json()
             return dados.get("situacao", "Não encontrado")
@@ -136,26 +43,35 @@ def consultar_cnpj(cnpj):
     except Exception as e:
         return f"Erro: {str(e)}"
 
-def contagem_regressiva(segundos):
-    for i in range(segundos, 0, -1):
-        st.write(f"⏳ Próximo lote em {i} segundos...")
-        time.sleep(1)
+# ---------------------------
+# 🖥️ Interface com abas
+st.set_page_config(page_title="Validador de CNPJs", layout="wide")
+st.title("🔍 Validador de CNPJs com ReceitaWS + Banco Neon")
+aba1, aba2, aba3 = st.tabs(["📤 Validação", "📊 Dashboard", "📦 Histórico"])
 
-st.set_page_config(page_title="Validador + CRM Simplificado", layout="wide")
-st.title("🔍 Validador de CNPJs + CRM Simplificado")
-
-aba1, aba2, aba3, aba4 = st.tabs(["📤 Validação", "📊 Dashboard", "📦 Histórico", "🗂 CRM"])
-
-# Aba 1: Validação
+# ---------------------------
+# Aba 1: Validação automática com pausa e timer
 with aba1:
     st.subheader("📤 Validação de CNPJs")
-    modelo_df = pd.DataFrame({"CNPJ": ["00000000000000"], "Nome": ["Empresa Exemplo"], "Telefone": ["(00) 00000-0000"]})
+
+    modelo_df = pd.DataFrame({
+        "CNPJ": ["00000000000000"],
+        "Nome": ["Empresa Exemplo"],
+        "Telefone": ["(00) 00000-0000"]
+    })
+
     excel_buffer = io.BytesIO()
     with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
         modelo_df.to_excel(writer, index=False, sheet_name="Modelo")
-    st.download_button("📥 Baixar planilha modelo", excel_buffer.getvalue(), "modelo_planilha.xlsx")
 
-    arquivo = st.file_uploader("📄 Envie sua planilha", type=["xlsx", "csv"])
+    st.download_button(
+        label="📥 Baixar planilha modelo",
+        data=excel_buffer.getvalue(),
+        file_name="modelo_planilha.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+    arquivo = st.file_uploader("📄 Envie sua planilha preenchida", type=["xlsx", "csv"])
     colunas_esperadas = ["CNPJ", "Nome", "Telefone"]
 
     if "df_validacao" not in st.session_state:
@@ -164,19 +80,22 @@ with aba1:
         st.session_state.indice_lote = 0
     if "pausado" not in st.session_state:
         st.session_state.pausado = False
-
-    tempo_entre_lotes = st.slider("⏱️ Tempo entre lotes (segundos)", 1, 30, 5)
+    if "proximo_tempo_validacao" not in st.session_state:
+        st.session_state.proximo_tempo_validacao = 0  # timestamp unix
 
     if arquivo and st.session_state.df_validacao is None:
         df = pd.read_excel(arquivo) if arquivo.name.endswith(".xlsx") else pd.read_csv(arquivo)
+
         if all(col in df.columns for col in colunas_esperadas):
             erros = []
+
             df["CNPJ"] = df["CNPJ"].astype(str).str.replace(r"\D", "", regex=True)
             df["Telefone"] = df["Telefone"].astype(str)
 
             for i, row in df.iterrows():
                 cnpj = row["CNPJ"]
                 telefone = row["Telefone"]
+
                 if not cnpj.isdigit() or len(cnpj) != 14:
                     erros.append(f"Linha {i+2}: CNPJ inválido ({cnpj})")
                 if len(''.join(filter(str.isdigit, telefone))) < 11:
@@ -193,95 +112,97 @@ with aba1:
                 for erro in erros:
                     st.write(erro)
             else:
-                st.session_state.df_validacao = df
+                st.session_state.df_validacao = df.reset_index(drop=True)
                 st.session_state.indice_lote = 0
-                st.success("📋 Planilha carregada com sucesso!")
+                st.success("📋 Planilha válida e carregada com sucesso!")
         else:
-            st.error("❌ Estrutura inválida. Colunas necessárias: CNPJ, Nome, Telefone.")
+            st.error("❌ Estrutura inválida. Certifique-se de que sua planilha contém as colunas: CNPJ, Nome, Telefone.")
+            st.write("Colunas encontradas:", list(df.columns))
 
     df_validacao = st.session_state.df_validacao
+
     if df_validacao is not None:
         total = len(df_validacao)
         st.write(f"📦 Total de empresas: {total}")
-        progresso = st.progress(st.session_state.indice_lote / total)
+        progresso = st.progress(st.session_state.indice_lote / total if total > 0 else 0)
 
-        col1, col2 = st.columns(2)
+        col1, col2 = st.columns([1, 4])
         with col1:
             if st.button("⏸️ Pausar/Retomar"):
                 st.session_state.pausado = not st.session_state.pausado
+                if not st.session_state.pausado:
+                    st.session_state.proximo_tempo_validacao = 0
+
         with col2:
-            if st.button("✅ Validar próximo lote") and not st.session_state.pausado:
-                contagem_regressiva(tempo_entre_lotes)
-                lote = df_validacao.iloc[st.session_state.indice_lote:st.session_state.indice_lote+3]
-                for idx, row in lote.iterrows():
-                    cnpj = row["CNPJ"]
-                    nome = row.get("Nome", "")
-                    telefone = row.get("Telefone", "")
+            if st.session_state.pausado:
+                st.warning("⏸️ Validação pausada.")
+            else:
+                agora = time.time()
+                if st.session_state.indice_lote >= total:
+                    st.success("🎉 Validação concluída!")
+                elif agora >= st.session_state.proximo_tempo_validacao:
+                    lote = df_validacao.iloc[st.session_state.indice_lote:st.session_state.indice_lote + 3]
 
-                    cursor.execute("SELECT situacao_rf FROM empresas WHERE cnpj = %s", (cnpj,))
-                    resultado_existente = cursor.fetchone()
+                    for idx, row in lote.iterrows():
+                        cnpj = row["CNPJ"]
+                        nome = row.get("Nome", "")
+                        telefone = row.get("Telefone", "")
 
-                    if resultado_existente:
-                        situacao = resultado_existente[0]
-                        st.write(f"🔁 {cnpj}: já registrado como '{situacao}'")
-                    else:
-                        situacao = consultar_cnpj(cnpj)
-                        time.sleep(5)
-                        cursor.execute("""
-                            INSERT INTO empresas (cnpj, nome, telefone, situacao_rf)
-                            VALUES (%s, %s, %s, %s)
-                            ON CONFLICT (cnpj) DO NOTHING
-                        """, (cnpj, nome, telefone, situacao))
-                        conn.commit()
-                        st.write(f"✅ {cnpj}: {situacao}")
+                        cursor.execute("SELECT situacao_rf FROM empresas WHERE cnpj = %s", (cnpj,))
+                        resultado_existente = cursor.fetchone()
 
-                st.session_state.indice_lote += 3
-                progresso.progress(min(st.session_state.indice_lote / total, 1.0))
+                        if resultado_existente:
+                            situacao = resultado_existente[0]
+                            st.write(f"🔁 {cnpj}: já registrado como '{situacao}'")
+                        else:
+                            situacao = consultar_cnpj(cnpj)
+                            time.sleep(5)  # API rate limit
 
-        if st.session_state.indice_lote >= total:
-            st.success("🎉 Validação concluída!")
+                            cursor.execute("""
+                                INSERT INTO empresas (cnpj, nome, telefone, situacao_rf, created_at)
+                                VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                                ON CONFLICT (cnpj) DO NOTHING
+                            """, (cnpj, nome, telefone, situacao))
+                            conn.commit()
 
-# Aba 2: Dashboard
+                            st.write(f"✅ {cnpj}: {situacao}")
+
+                    st.session_state.indice_lote += 3
+                    progresso.progress(min(st.session_state.indice_lote / total, 1.0))
+
+                    st.session_state.proximo_tempo_validacao = agora + 180  # 3 minutos
+                else:
+                    tempo_restante = int(st.session_state.proximo_tempo_validacao - agora)
+                    st.info(f"⏳ Próximo lote em {tempo_restante} segundos...")
+
+                    st_autorefresh(interval=1000, limit=180, key="autorefresh_timer")
+
+# ---------------------------
+# Aba 2: Dashboard (mantive igual ao original)
 with aba2:
     st.subheader("📊 Dashboard de Situação dos CNPJs")
 
     cursor.execute("SELECT situacao_rf FROM empresas")
-    dados_rf = cursor.fetchall()
-    df_rf = pd.DataFrame(dados_rf, columns=["Situação RF"]) if dados_rf else pd.DataFrame(columns=["Situação RF"])
-    contagem_rf = df_rf["Situação RF"].value_counts()
+    dados = cursor.fetchall()
+    if dados:
+        df_dashboard = pd.DataFrame(dados, columns=["Situação RF"])
+        contagem = df_dashboard["Situação RF"].value_counts()
 
-    cursor.execute("SELECT crm_status FROM empresas")
-    dados_crm = cursor.fetchall()
-    df_crm = pd.DataFrame(dados_crm, columns=["CRM Status"]) if dados_crm else pd.DataFrame(columns=["CRM Status"])
-    contagem_crm = df_crm["CRM Status"].value_counts()
+        st.bar_chart(contagem)
 
-    col1, col2, col3, col4 = st.columns(4)
+        fig, ax = plt.subplots()
+        ax.pie(contagem, labels=contagem.index, autopct="%1.1f%%", startangle=90)
+        ax.axis("equal")
+        st.pyplot(fig)
 
-    with col1:
-        st.write("📊 Situação RF (Barras)")
-        st.bar_chart(contagem_rf)
+        st.write("📋 Distribuição das situações:", contagem)
+    else:
+        st.info("Nenhum dado encontrado no banco ainda.")
 
-    with col2:
-        st.write("📋 Distribuição das situações RF")
-        st.dataframe(contagem_rf.to_frame().rename(columns={"Situação RF": "Quantidade"}))
-
-    with col3:
-        st.write("📊 Distribuição CRM Status")
-        fig_crm, ax_crm = plt.subplots(figsize=(3, 3))
-        ax_crm.pie(contagem_crm, labels=contagem_crm.index, autopct="%1.1f%%", startangle=90)
-        ax_crm.axis("equal")
-        st.pyplot(fig_crm, use_container_width=True)
-
-    with col4:
-        st.write("🍰 Situação RF (Pizza)")
-        fig_rf, ax_rf = plt.subplots(figsize=(3, 3))
-        ax_rf.pie(contagem_rf, labels=contagem_rf.index, autopct="%1.1f%%", startangle=90)
-        ax_rf.axis("equal")
-        st.pyplot(fig_rf, use_container_width=True)
-
-# Aba 3: Histórico
+# ---------------------------
+# Aba 3: Histórico (igual ao original)
 with aba3:
-    st.subheader("📦 Histórico de empresas validadas")
+    st.subheader("📦 Histórico de registros salvos no banco Neon")
 
     data_inicio = st.date_input("📅 Data inicial", value=date(2024, 1, 1))
     data_fim = st.date_input("📅 Data final", value=date.today())
@@ -297,82 +218,19 @@ with aba3:
 
         if dados:
             df_banco = pd.DataFrame(dados, columns=["CNPJ", "Nome", "Telefone", "Situação RF", "Data"])
+
+            situacoes = st.multiselect("📌 Filtrar por situação RF", options=df_banco["Situação RF"].unique())
+            if situacoes:
+                df_banco = df_banco[df_banco["Situação RF"].isin(situacoes)]
+
             st.dataframe(df_banco)
+
+            csv = df_banco.to_csv(index=False)
+            st.download_button(
+                label="📥 Exportar CSV",
+                data=csv,
+                file_name="historico_empresas.csv",
+                mime="text/csv"
+            )
         else:
-            st.info("Nenhum dado encontrado no período selecionado.")
-
-# Aba 4: CRM Simplificado
-with aba4:
-    st.subheader("🗂 CRM Simplificado")
-
-    status_list = ["Prospect", "Em Negociação", "Cliente", "Perdido"]
-
-    cursor.execute("""
-        SELECT id, cnpj, nome, telefone, situacao_rf, crm_status, crm_notas, proximo_contato 
-        FROM empresas
-        ORDER BY id
-    """)
-    empresas = cursor.fetchall()
-
-    empresas_por_status = {status: [] for status in status_list}
-    for e in empresas:
-        id_, cnpj, nome, telefone, situacao_rf, crm_status, crm_notas, proximo_contato = e
-        if crm_status not in status_list:
-            crm_status = "Prospect"
-        empresas_por_status[crm_status].append({
-            "id": id_,
-            "cnpj": cnpj,
-            "nome": nome,
-            "telefone": telefone,
-            "situacao_rf": situacao_rf,
-            "crm_notas": crm_notas or "",
-            "proximo_contato": proximo_contato.strftime("%Y-%m-%d") if proximo_contato else "",
-        })
-
-    st.markdown('<div class="crm-container">', unsafe_allow_html=True)
-    colunas = st.columns(len(status_list), gap="medium")
-
-    def atualizar_status(id_, novo_status):
-        cursor.execute("UPDATE empresas SET crm_status=%s WHERE id=%s", (novo_status, id_))
-        conn.commit()
-
-    def salvar_notas(id_, notas, data_contato):
-        cursor.execute("""
-            UPDATE empresas SET crm_notas=%s, proximo_contato=%s WHERE id=%s
-        """, (notas, data_contato if data_contato else None, id_))
-        conn.commit()
-
-    for i, status in enumerate(status_list):
-        with colunas[i]:
-            st.markdown(f"### {status} ({len(empresas_por_status[status])})")
-            for empresa in empresas_por_status[status]:
-                st.markdown(f"**{empresa['nome']}** ({empresa['cnpj']})")
-                st.write(f"Telefone: {empresa['telefone']}")
-                st.write(f"Situação RF: {empresa['situacao_rf']}")
-                col_move = st.columns([1, 2, 1])
-                with col_move[0]:
-                    if st.button("⬅️", key=f"voltar_{empresa['id']}") and status != status_list[0]:
-                        idx = status_list.index(status)
-                        atualizar_status(empresa["id"], status_list[idx - 1])
-                        st.session_state["needs_rerun"] = True
-                with col_move[2]:
-                    if st.button("➡️", key=f"avancar_{empresa['id']}") and status != status_list[-1]:
-                        idx = status_list.index(status)
-                        atualizar_status(empresa["id"], status_list[idx + 1])
-                        st.session_state["needs_rerun"] = True
-                notas = st.text_area("Notas", value=empresa['crm_notas'], key=f"notas_{empresa['id']}")
-                data_contato = st.date_input(
-                    "Próximo contato",
-                    value=pd.to_datetime(empresa['proximo_contato']).date() if empresa['proximo_contato'] else date.today(),
-                    key=f"data_{empresa['id']}"
-                )
-                if st.button("Salvar", key=f"salvar_{empresa['id']}"):
-                    salvar_notas(empresa["id"], notas, data_contato)
-                    st.success("Atualizado!")
-                    st.session_state["needs_rerun"] = True
-                st.markdown("---")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-if st.session_state.get("needs_rerun", False):
-    st.session_state["needs_rerun"] = False
-    st.experimental_rerun()
+            st.info("Nenhum registro encontrado para o período selecionado.")
