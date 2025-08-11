@@ -121,51 +121,73 @@ with aba1:
     df_validacao = st.session_state.df_validacao
 
     if df_validacao is not None:
-        total = len(df_validacao)
-        st.write(f"📦 Total de empresas: {total}")
-        progresso = st.progress(st.session_state.indice_lote / total)
+    total = len(df_validacao)
+    st.write(f"📦 Total de empresas: {total}")
+    progresso = st.progress(st.session_state.indice_lote / total)
 
-        if st.button("✅ Validar próximo lote"):
-            resultados = []
-            i = st.session_state.indice_lote
-            lote = df_validacao.iloc[i:i+3]
+    # ⚙️ Configuração do tempo entre lotes
+    tempo_entre_lotes = st.number_input("⏱️ Tempo entre lotes (segundos)", min_value=60, max_value=600, value=180, step=30)
 
-            for idx, row in lote.iterrows():
-                cnpj = row["CNPJ"]
-                nome = row.get("Nome", "")
-                telefone = row.get("Telefone", "")
+    if "validacao_automatica" not in st.session_state:
+        st.session_state.validacao_automatica = False
+    if "pausar_validacao" not in st.session_state:
+        st.session_state.pausar_validacao = False
 
-                cursor.execute("SELECT situacao_rf FROM empresas WHERE cnpj = %s", (cnpj,))
-                resultado_existente = cursor.fetchone()
+    col1, col2 = st.columns(2)
+    with col1:
+        if not st.session_state.validacao_automatica:
+            if st.button("🚀 Iniciar validação automática"):
+                st.session_state.validacao_automatica = True
+                st.rerun()
+    with col2:
+        if st.session_state.validacao_automatica:
+            if st.button("⏸️ Pausar validação"):
+                st.session_state.validacao_automatica = False
+                st.session_state.pausar_validacao = True
+                st.success("⏸️ Validação pausada.")
 
-                if resultado_existente:
-                    situacao = resultado_existente[0]
-                    st.write(f"🔁 {cnpj}: já registrado como '{situacao}'")
-                else:
+    if st.session_state.validacao_automatica and st.session_state.indice_lote < total:
+        i = st.session_state.indice_lote
+        lote = df_validacao.iloc[i:i+3]
+        st.info(f"🔄 Validando lote {i+1} a {min(i+3, total)} de {total}")
+
+        for idx, row in lote.iterrows():
+            cnpj = row["CNPJ"]
+            nome = row.get("Nome", "")
+            telefone = row.get("Telefone", "")
+
+            cursor.execute("SELECT situacao_rf FROM empresas WHERE cnpj = %s", (cnpj,))
+            resultado_existente = cursor.fetchone()
+
+            if resultado_existente:
+                situacao = resultado_existente[0]
+                st.write(f"🔁 {cnpj}: já registrado como '{situacao}'")
+            else:
+                with st.spinner(f"⏳ Consultando ReceitaWS para CNPJ {cnpj}..."):
                     situacao = consultar_cnpj(cnpj)
                     time.sleep(5)
 
-                    cursor.execute("""
-                        INSERT INTO empresas (cnpj, nome, telefone, situacao_rf, created_at)
-                        VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
-                    """, (cnpj, nome, telefone, situacao))
-                    conn.commit()
+                cursor.execute("""
+                    INSERT INTO empresas (cnpj, nome, telefone, situacao_rf, created_at)
+                    VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                """, (cnpj, nome, telefone, situacao))
+                conn.commit()
 
-                    st.write(f"✅ {cnpj}: {situacao}")
+                st.write(f"✅ {cnpj}: {situacao}")
 
-                resultados.append({
-                    "CNPJ": cnpj,
-                    "Nome": nome,
-                    "Telefone": telefone,
-                    "Situação RF": situacao
-                })
+        st.session_state.indice_lote += 3
+        progresso.progress(min(st.session_state.indice_lote / total, 1.0))
 
-            st.session_state.indice_lote += 3
-            progresso.progress(min(st.session_state.indice_lote / total, 1.0))
-
-        if st.session_state.indice_lote >= total:
-            st.success("🎉 Validação concluída!")
-
+        if st.session_state.indice_lote < total:
+            st.info(f"⏳ Aguardando {tempo_entre_lotes} segundos para o próximo lote...")
+            contador = st.empty()
+            for t in range(tempo_entre_lotes, 0, -1):
+                contador.markdown(f"⌛ Próximo lote em **{t}** segundos...")
+                time.sleep(1)
+            st.rerun()
+        else:
+            st.success("🎉 Validação automática concluída!")
+            st.session_state.validacao_automatica = False
 with aba2:
     st.subheader("📊 Dashboard de Situação dos CNPJs")
 
@@ -211,3 +233,4 @@ with aba3:
             excel_buffer = io.BytesIO()
             with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
                 df_banco.to_excel(writer, index=False, sheet_name="Empresas")
+
