@@ -10,3 +10,4 @@ streamlit-aggrid
 Workbook
 date
 io
+matplotlib.pyplot
