@@ -217,11 +217,4 @@ with aba3:
         if dados:
             df_banco = pd.DataFrame(dados, columns=["CNPJ", "Nome", "Telefone", "Situação RF", "Data"])
 
-            situacoes = st.multiselect("📌 Filtrar por situação RF", options=df_banco["Situação RF"].unique())
-            if situacoes:
-                df_banco = df_banco[df_banco["Situação RF"].isin(situacoes)]
-
-            st.dataframe(df_banco)
-
-            csv =
-            
+            situacoes = st.multiselect("📌 Fil
