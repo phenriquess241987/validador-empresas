@@ -5,12 +5,13 @@ import time
 import psycopg2
 import io
 from datetime import date
+import matplotlib.pyplot as plt
 
 # --- Conexão com banco ---
 conn = psycopg2.connect(st.secrets["database"]["url"])
 cursor = conn.cursor()
 
-# --- Criação e alteração da tabela com colunas CRM ---
+# --- Inicializa tabela e colunas CRM ---
 def inicializar_banco():
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS empresas (
@@ -27,7 +28,6 @@ def inicializar_banco():
     """)
     conn.commit()
 
-    # Adiciona colunas que possam faltar
     for coluna, tipo, default in [
         ("crm_status", "TEXT", "'Prospect'"),
         ("crm_notas", "TEXT", "NULL"),
@@ -47,7 +47,6 @@ def inicializar_banco():
 
 inicializar_banco()
 
-# --- Função para consultar CNPJ ReceitaWS ---
 @st.cache_data(show_spinner=False)
 def consultar_cnpj(cnpj):
     cnpj = ''.join(filter(str.isdigit, str(cnpj)))
@@ -63,13 +62,11 @@ def consultar_cnpj(cnpj):
     except Exception as e:
         return f"Erro: {str(e)}"
 
-# --- Função contagem regressiva ---
 def contagem_regressiva(segundos):
     for i in range(segundos, 0, -1):
         st.write(f"⏳ Próximo lote em {i} segundos...")
         time.sleep(1)
 
-# --- Configuração da página ---
 st.set_page_config(page_title="Validador + CRM Simplificado", layout="wide")
 st.title("🔍 Validador de CNPJs + CRM Simplificado")
 
@@ -78,7 +75,6 @@ aba1, aba2, aba3 = st.tabs(["📤 Validação", "📊 Dashboard", "📦 Históri
 # --- Aba 1: Validação ---
 with aba1:
     st.subheader("📤 Validação de CNPJs")
-
     modelo_df = pd.DataFrame({"CNPJ": ["00000000000000"], "Nome": ["Empresa Exemplo"], "Telefone": ["(00) 00000-0000"]})
     excel_buffer = io.BytesIO()
     with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
@@ -174,21 +170,49 @@ with aba1:
 # --- Aba 2: Dashboard ---
 with aba2:
     st.subheader("📊 Dashboard de Situação dos CNPJs")
-    cursor.execute("SELECT situacao_rf FROM empresas")
-    dados = cursor.fetchall()
-    if dados:
-        df_dashboard = pd.DataFrame(dados, columns=["Situação RF"])
-        contagem = df_dashboard["Situação RF"].value_counts()
-        st.bar_chart(contagem)
 
-        import matplotlib.pyplot as plt
-        fig, ax = plt.subplots()
-        ax.pie(contagem, labels=contagem.index, autopct="%1.1f%%", startangle=90)
-        ax.axis("equal")
-        st.pyplot(fig)
-        st.write("📋 Distribuição das situações:", contagem)
-    else:
-        st.info("Nenhum dado encontrado.")
+    # Dados situação RF
+    cursor.execute("SELECT situacao_rf FROM empresas")
+    dados_rf = cursor.fetchall()
+    df_rf = pd.DataFrame(dados_rf, columns=["Situação RF"]) if dados_rf else pd.DataFrame(columns=["Situação RF"])
+    contagem_rf = df_rf["Situação RF"].value_counts()
+
+    # Dados CRM
+    cursor.execute("SELECT crm_status FROM empresas")
+    dados_crm = cursor.fetchall()
+    df_crm = pd.DataFrame(dados_crm, columns=["CRM Status"]) if dados_crm else pd.DataFrame(columns=["CRM Status"])
+    contagem_crm = df_crm["CRM Status"].value_counts()
+
+    # Layout: duas linhas
+    st.markdown("### Situação RF e CRM")
+    row1_col1, row1_col2 = st.columns([1, 3])
+    row2_col1, row2_col2 = st.columns(2)
+
+    # Linha 1, esquerda: gráfico barras situação RF estreito
+    with row1_col1:
+        st.write("📊 Situação RF (Barras)")
+        st.bar_chart(contagem_rf)
+
+    # Linha 1, direita: gráfico pizza situação RF
+    with row1_col2:
+        st.write("🍰 Situação RF (Pizza)")
+        fig1, ax1 = plt.subplots()
+        ax1.pie(contagem_rf, labels=contagem_rf.index, autopct="%1.1f%%", startangle=90)
+        ax1.axis("equal")
+        st.pyplot(fig1, use_container_width=True)
+
+    # Linha 2, esquerda: tabela distribuição situação RF
+    with row2_col1:
+        st.write("📋 Distribuição das situações RF")
+        st.dataframe(contagem_rf.to_frame().rename(columns={"Situação RF":"Quantidade"}))
+
+    # Linha 2, direita: gráfico pizza CRM status
+    with row2_col2:
+        st.write("📊 Distribuição CRM Status")
+        fig2, ax2 = plt.subplots()
+        ax2.pie(contagem_crm, labels=contagem_crm.index, autopct="%1.1f%%", startangle=90)
+        ax2.axis("equal")
+        st.pyplot(fig2, use_container_width=True)
 
 # --- Aba 3: Histórico / CRM Simplificado ---
 with aba3:
@@ -261,6 +285,7 @@ with aba3:
                     st.session_state["needs_rerun"] = True
                 st.markdown("---")
 
-    if st.session_state.get("needs_rerun", False):
-        st.session_state["needs_rerun"] = False
-        st.experimental_rerun()
+# --- Controle seguro do rerun ---
+if st.session_state.get("needs_rerun", False):
+    st.session_state["needs_rerun"] = False
+    st.experimental_rerun()
