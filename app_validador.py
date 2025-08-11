@@ -41,23 +41,18 @@ def consultar_cnpj(cnpj):
     except Exception as e:
         return f"Erro: {str(e)}"
 
-# ⏱️ Contagem regressiva visual
-def contagem_regressiva(segundos):
-    for i in range(segundos, 0, -1):
-        st.write(f"⏳ Próximo lote em {i} segundos...")
-        time.sleep(1)
-
 # 🖥️ Interface com abas
-st.set_page_config(page_title="Validador de CNPJs", layout="wide")
 st.title("🔍 Validador de CNPJs com ReceitaWS + Banco Neon")
 aba1, aba2, aba3 = st.tabs(["📤 Validação", "📊 Dashboard", "📦 Histórico"])
 
 with aba1:
     st.subheader("📤 Validação de CNPJs")
 
+    # 📍 Instrução clara
     st.markdown("### 📎 Baixe a planilha modelo para garantir o formato correto")
     st.markdown("A planilha deve conter as colunas: **CNPJ**, **Nome**, **Telefone**")
 
+    # 📄 Gerar planilha modelo
     modelo_df = pd.DataFrame({
         "CNPJ": ["00000000000000"],
         "Nome": ["Empresa Exemplo"],
@@ -75,6 +70,7 @@ with aba1:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
+    # 📤 Upload da planilha
     arquivo = st.file_uploader("📄 Envie sua planilha preenchida", type=["xlsx", "csv"])
     colunas_esperadas = ["CNPJ", "Nome", "Telefone"]
 
@@ -82,17 +78,15 @@ with aba1:
         st.session_state.df_validacao = None
     if "indice_lote" not in st.session_state:
         st.session_state.indice_lote = 0
-    if "pausado" not in st.session_state:
-        st.session_state.pausado = False
-
-    tempo_entre_lotes = st.slider("⏱️ Tempo entre lotes (segundos)", min_value=1, max_value=30, value=5)
 
     if arquivo and st.session_state.df_validacao is None:
         df = pd.read_excel(arquivo) if arquivo.name.endswith(".xlsx") else pd.read_csv(arquivo)
 
+        # ✅ Validação da estrutura
         if all(col in df.columns for col in colunas_esperadas):
             erros = []
 
+            # 🔍 Validação de formato
             df["CNPJ"] = df["CNPJ"].astype(str).str.replace(r"\D", "", regex=True)
             df["Telefone"] = df["Telefone"].astype(str)
 
@@ -105,6 +99,7 @@ with aba1:
                 if len(''.join(filter(str.isdigit, telefone))) < 11:
                     erros.append(f"Linha {i+2}: Telefone inválido ({telefone})")
 
+            # 🚫 Verificar duplicidade de CNPJs
             duplicados = df[df.duplicated(subset=["CNPJ"], keep=False)]
             if not duplicados.empty:
                 erros.append("⚠️ CNPJs duplicados encontrados:")
@@ -130,15 +125,7 @@ with aba1:
         st.write(f"📦 Total de empresas: {total}")
         progresso = st.progress(st.session_state.indice_lote / total)
 
-        if st.button("⏸️ Pausar/Retomar"):
-            st.session_state.pausado = not st.session_state.pausado
-
-        if st.session_state.pausado:
-            st.warning("⏸️ Validação pausada. Clique novamente para retomar.")
-            st.stop()
-
         if st.button("✅ Validar próximo lote"):
-            contagem_regressiva(tempo_entre_lotes)
             resultados = []
             i = st.session_state.indice_lote
             lote = df_validacao.iloc[i:i+3]
@@ -216,12 +203,12 @@ with aba3:
 
         if dados:
             df_banco = pd.DataFrame(dados, columns=["CNPJ", "Nome", "Telefone", "Situação RF", "Data"])
-
-            situacoes = st.multiselect("📌 Filtrar por situação RF", options=df_banco["Situação RF"].unique())
-            if situacoes:
-                df_banco = df_banco[df_banco["Situação RF"].isin(situacoes)]
-
             st.dataframe(df_banco)
 
             csv = df_banco.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 Baixar como CSV", data=csv, file_name="empresas_salvas.csv", mime
+            st.download_button("📥 Baixar como CSV", data=csv, file_name="empresas_salvas.csv", mime="text/csv")
+
+            excel_buffer = io.BytesIO()
+            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                df_banco.to_excel(writer, index=False, sheet_name="Empresas")
+
