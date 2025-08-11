@@ -217,3 +217,10 @@ with aba3:
         else:
             st.info("Nenhum dado encontrado nesse intervalo.")
 
+# 🔁 Atualizar automaticamente os dado
+    import streamlit_autorefresh
+
+# ⏱️ Atualiza a aba a cada 30 segundos
+streamlit_autorefresh.autorefresh(interval=30000, key="hist_refresh")
+
+
