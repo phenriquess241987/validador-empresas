@@ -26,13 +26,14 @@ cursor.execute("""
 conn.commit()
 
 # 🔍 Função para consultar CNPJ na ReceitaWS
+@st.cache_data(show_spinner=False)
 def consultar_cnpj(cnpj):
     cnpj = ''.join(filter(str.isdigit, str(cnpj)))
     url = f"https://www.receitaws.com.br/v1/cnpj/{cnpj}"
     headers = {"Accept": "application/json"}
     
     try:
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, timeout=10)
         if response.status_code == 200:
             dados = response.json()
             return dados.get("situacao", "Não encontrado")
@@ -57,8 +58,6 @@ with aba1:
     st.subheader("📤 Validação de CNPJs")
 
     st.markdown("### 📎 Baixe a planilha modelo para garantir o formato correto")
-    st.markdown("A planilha deve conter as colunas: **CNPJ**, **Nome**, **Telefone**")
-
     modelo_df = pd.DataFrame({
         "CNPJ": ["00000000000000"],
         "Nome": ["Empresa Exemplo"],
@@ -93,7 +92,6 @@ with aba1:
 
         if all(col in df.columns for col in colunas_esperadas):
             erros = []
-
             df["CNPJ"] = df["CNPJ"].astype(str).str.replace(r"\D", "", regex=True)
             df["Telefone"] = df["Telefone"].astype(str)
 
@@ -122,7 +120,6 @@ with aba1:
                 st.success("📋 Planilha válida e carregada com sucesso!")
         else:
             st.error("❌ Estrutura inválida. Certifique-se de que sua planilha contém as colunas: CNPJ, Nome, Telefone.")
-            st.write("Colunas encontradas:", list(df.columns))
 
     df_validacao = st.session_state.df_validacao
 
@@ -131,51 +128,46 @@ with aba1:
         st.write(f"📦 Total de empresas: {total}")
         progresso = st.progress(st.session_state.indice_lote / total)
 
-        if st.button("⏸️ Pausar/Retomar"):
-            st.session_state.pausado = not st.session_state.pausado
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("⏸️ Pausar/Retomar"):
+                st.session_state.pausado = not st.session_state.pausado
+        with col2:
+            if st.button("✅ Validar próximo lote") and not st.session_state.pausado:
+                contagem_regressiva(tempo_entre_lotes)
+                lote = df_validacao.iloc[st.session_state.indice_lote:st.session_state.indice_lote+3]
+                resultados = []
 
-        if st.session_state.pausado:
-            st.warning("⏸️ Validação pausada. Clique novamente para retomar.")
-            st.stop()
+                for idx, row in lote.iterrows():
+                    cnpj = row["CNPJ"]
+                    nome = row.get("Nome", "")
+                    telefone = row.get("Telefone", "")
 
-        if st.button("✅ Validar próximo lote"):
-            contagem_regressiva(tempo_entre_lotes)
-            resultados = []
-            i = st.session_state.indice_lote
-            lote = df_validacao.iloc[i:i+3]
+                    cursor.execute("SELECT situacao_rf FROM empresas WHERE cnpj = %s", (cnpj,))
+                    resultado_existente = cursor.fetchone()
 
-            for idx, row in lote.iterrows():
-                cnpj = row["CNPJ"]
-                nome = row.get("Nome", "")
-                telefone = row.get("Telefone", "")
+                    if resultado_existente:
+                        situacao = resultado_existente[0]
+                        st.write(f"🔁 {cnpj}: já registrado como '{situacao}'")
+                    else:
+                        situacao = consultar_cnpj(cnpj)
+                        time.sleep(5)
+                        cursor.execute("""
+                            INSERT INTO empresas (cnpj, nome, telefone, situacao_rf)
+                            VALUES (%s, %s, %s, %s)
+                        """, (cnpj, nome, telefone, situacao))
+                        conn.commit()
+                        st.write(f"✅ {cnpj}: {situacao}")
 
-                cursor.execute("SELECT situacao_rf FROM empresas WHERE cnpj = %s", (cnpj,))
-                resultado_existente = cursor.fetchone()
+                    resultados.append({
+                        "CNPJ": cnpj,
+                        "Nome": nome,
+                        "Telefone": telefone,
+                        "Situação RF": situacao
+                    })
 
-                if resultado_existente:
-                    situacao = resultado_existente[0]
-                    st.write(f"🔁 {cnpj}: já registrado como '{situacao}'")
-                else:
-                    situacao = consultar_cnpj(cnpj)
-                    time.sleep(5)
-
-                    cursor.execute("""
-                        INSERT INTO empresas (cnpj, nome, telefone, situacao_rf, created_at)
-                        VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
-                    """, (cnpj, nome, telefone, situacao))
-                    conn.commit()
-
-                    st.write(f"✅ {cnpj}: {situacao}")
-
-                resultados.append({
-                    "CNPJ": cnpj,
-                    "Nome": nome,
-                    "Telefone": telefone,
-                    "Situação RF": situacao
-                })
-
-            st.session_state.indice_lote += 3
-            progresso.progress(min(st.session_state.indice_lote / total, 1.0))
+                st.session_state.indice_lote += 3
+                progresso.progress(min(st.session_state.indice_lote / total, 1.0))
 
         if st.session_state.indice_lote >= total:
             st.success("🎉 Validação concluída!")
@@ -226,4 +218,24 @@ with aba3:
 
             st.dataframe(df_banco)
 
-            csv = df_banco.to_csv(index=False
+            # Download CSV
+            csv = df_banco.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="📥 Baixar CSV",
+                data=csv,
+                file_name="historico_cnpjs.csv",
+                mime="text/csv"
+            )
+
+            # Download Excel
+            excel_buffer = io.BytesIO()
+            with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
+                df_banco.to_excel(writer, index=False, sheet_name="Histórico")
+            st.download_button(
+                label="📥 Baixar Excel",
+                data=excel_buffer.getvalue(),
+                file_name="historico_cnpjs.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        else:
+            st.info("Nenhum registro encontrado para o período selecionado.")
