@@ -4,3 +4,4 @@ requests
 openpyxl
 psycopg2-binary
 matplotlib
+streamlit-autorefresh
