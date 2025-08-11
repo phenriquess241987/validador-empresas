@@ -217,4 +217,12 @@ with aba3:
         if dados:
             df_banco = pd.DataFrame(dados, columns=["CNPJ", "Nome", "Telefone", "Situação RF", "Data"])
 
-            situacoes = st.multiselect("📌 Fil
+            situacoes = st.multiselect("📌 Filtrar por situação RF", options=df_banco["Situação RF"].unique())
+            if situacoes:
+                df_banco = df_banco[df_banco["Situação RF"].isin(situacoes)]
+
+            st.dataframe(df_banco)
+
+            csv = df_banco.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Baixar como
