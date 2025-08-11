@@ -7,7 +7,7 @@ import io
 from datetime import date
 import matplotlib.pyplot as plt
 
-# --- CSS para fixar abas no topo, ajustar tema escuro e CRM ---
+# --- CSS para fixar abas no topo, tema escuro e CRM ---
 st.markdown(
     """
     <style>
@@ -33,7 +33,7 @@ st.markdown(
         gap: 20px;
         padding-bottom: 10px;
     }
-    /* Para inputs, botões, texto e áreas de texto no modo escuro */
+    /* Inputs, botões e textos no modo escuro */
     .stButton > button {
         background-color: #333 !important;
         color: #eee !important;
@@ -54,23 +54,24 @@ st.markdown(
         padding: 10px;
         border-radius: 8px;
         border: 1px solid #444;
+        min-width: 300px;
     }
-    /* Fundo das barras de progresso */
+    /* Fundo barras progresso */
     div[role="progressbar"] > div {
         background-color: #0d6efd !important;
     }
-    /* Ajuste para data_input para tema escuro */
+    /* Data input tema escuro */
     .stDateInput > div > div > input {
         background-color: #222 !important;
         color: #eee !important;
         border: 1px solid #555 !important;
     }
-    /* Fundo das tabelas e dataframes */
+    /* Fundo tabelas e dataframes */
     .dataframe-container, .stDataFrame, .stTable {
         background-color: #121212 !important;
         color: #eee !important;
     }
-    /* Fundo dos charts (matplotlib) para tema escuro */
+    /* Fundo dos charts matplotlib tema escuro */
     .element-container svg {
         background-color: transparent !important;
     }
@@ -79,10 +80,10 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# --- Forçar matplotlib em tema escuro ---
+# Forçar matplotlib modo escuro
 plt.style.use('dark_background')
 
-# --- Conexão com banco ---
+# Conexão com banco
 conn = psycopg2.connect(st.secrets["database"]["url"])
 cursor = conn.cursor()
 
@@ -102,6 +103,7 @@ def inicializar_banco():
     """)
     conn.commit()
 
+    # Adicionar colunas se não existirem (compatibilidade)
     for coluna, tipo, default in [
         ("crm_status", "TEXT", "'Prospect'"),
         ("crm_notas", "TEXT", "NULL"),
@@ -115,7 +117,8 @@ def inicializar_banco():
             ) THEN
                 ALTER TABLE empresas ADD COLUMN {coluna} {tipo} DEFAULT {default};
             END IF;
-        END$$;
+        END
+        $$;
         """)
     conn.commit()
 
@@ -137,16 +140,18 @@ def consultar_cnpj(cnpj):
         return f"Erro: {str(e)}"
 
 def contagem_regressiva(segundos):
+    placeholder = st.empty()
     for i in range(segundos, 0, -1):
-        st.write(f"⏳ Próximo lote em {i} segundos...")
+        placeholder.write(f"⏳ Próximo lote em {i} segundos...")
         time.sleep(1)
+    placeholder.empty()
 
 st.set_page_config(page_title="Validador + CRM Simplificado", layout="wide")
 st.title("🔍 Validador de CNPJs + CRM Simplificado")
 
 aba1, aba2, aba3, aba4 = st.tabs(["📤 Validação", "📊 Dashboard", "📦 Histórico", "🗂 CRM"])
 
-# Aba 1: Validação
+# --- Aba 1: Validação ---
 with aba1:
     st.subheader("📤 Validação de CNPJs")
     modelo_df = pd.DataFrame({"CNPJ": ["00000000000000"], "Nome": ["Empresa Exemplo"], "Telefone": ["(00) 00000-0000"]})
@@ -164,9 +169,14 @@ with aba1:
         st.session_state.indice_lote = 0
     if "pausado" not in st.session_state:
         st.session_state.pausado = False
+    if "timer_ativo" not in st.session_state:
+        st.session_state.timer_ativo = False
+    if "ultimo_tempo" not in st.session_state:
+        st.session_state.ultimo_tempo = 0
 
-    tempo_entre_lotes = st.slider("⏱️ Tempo entre lotes (segundos)", 1, 30, 5)
+    tempo_entre_lotes = 180  # 3 minutos fixo para respeitar API
 
+    # Carregar planilha e validar automaticamente
     if arquivo and st.session_state.df_validacao is None:
         df = pd.read_excel(arquivo) if arquivo.name.endswith(".xlsx") else pd.read_csv(arquivo)
         if all(col in df.columns for col in colunas_esperadas):
@@ -192,12 +202,14 @@ with aba1:
                 st.error("❌ Erros encontrados na planilha:")
                 for erro in erros:
                     st.write(erro)
+                st.session_state.df_validacao = None
             else:
                 st.session_state.df_validacao = df
                 st.session_state.indice_lote = 0
                 st.success("📋 Planilha carregada com sucesso!")
         else:
             st.error("❌ Estrutura inválida. Colunas necessárias: CNPJ, Nome, Telefone.")
+            st.session_state.df_validacao = None
 
     df_validacao = st.session_state.df_validacao
     if df_validacao is not None:
@@ -205,43 +217,53 @@ with aba1:
         st.write(f"📦 Total de empresas: {total}")
         progresso = st.progress(st.session_state.indice_lote / total)
 
-        col1, col2 = st.columns(2)
+        col1, col2 = st.columns([1,1])
         with col1:
             if st.button("⏸️ Pausar/Retomar"):
                 st.session_state.pausado = not st.session_state.pausado
         with col2:
-            if st.button("✅ Validar próximo lote") and not st.session_state.pausado:
-                contagem_regressiva(tempo_entre_lotes)
-                lote = df_validacao.iloc[st.session_state.indice_lote:st.session_state.indice_lote+3]
-                for idx, row in lote.iterrows():
-                    cnpj = row["CNPJ"]
-                    nome = row.get("Nome", "")
-                    telefone = row.get("Telefone", "")
+            if not st.session_state.pausado:
+                if not st.session_state.timer_ativo and st.session_state.indice_lote < total:
+                    # Executa lote automático
+                    lote = df_validacao.iloc[st.session_state.indice_lote:st.session_state.indice_lote+3]
+                    for idx, row in lote.iterrows():
+                        cnpj = row["CNPJ"]
+                        nome = row.get("Nome", "")
+                        telefone = row.get("Telefone", "")
 
-                    cursor.execute("SELECT situacao_rf FROM empresas WHERE cnpj = %s", (cnpj,))
-                    resultado_existente = cursor.fetchone()
+                        cursor.execute("SELECT situacao_rf FROM empresas WHERE cnpj = %s", (cnpj,))
+                        resultado_existente = cursor.fetchone()
 
-                    if resultado_existente:
-                        situacao = resultado_existente[0]
-                        st.write(f"🔁 {cnpj}: já registrado como '{situacao}'")
-                    else:
-                        situacao = consultar_cnpj(cnpj)
-                        time.sleep(5)
-                        cursor.execute("""
-                            INSERT INTO empresas (cnpj, nome, telefone, situacao_rf)
-                            VALUES (%s, %s, %s, %s)
-                            ON CONFLICT (cnpj) DO NOTHING
-                        """, (cnpj, nome, telefone, situacao))
-                        conn.commit()
-                        st.write(f"✅ {cnpj}: {situacao}")
+                        if resultado_existente:
+                            situacao = resultado_existente[0]
+                            st.write(f"🔁 {cnpj}: já registrado como '{situacao}'")
+                        else:
+                            situacao = consultar_cnpj(cnpj)
+                            time.sleep(5)  # evita excesso na API
+                            cursor.execute("""
+                                INSERT INTO empresas (cnpj, nome, telefone, situacao_rf)
+                                VALUES (%s, %s, %s, %s)
+                                ON CONFLICT (cnpj) DO NOTHING
+                            """, (cnpj, nome, telefone, situacao))
+                            conn.commit()
+                            st.write(f"✅ {cnpj}: {situacao}")
 
-                st.session_state.indice_lote += 3
-                progresso.progress(min(st.session_state.indice_lote / total, 1.0))
+                    st.session_state.indice_lote += 3
+                    progresso.progress(min(st.session_state.indice_lote / total, 1.0))
+                    st.session_state.timer_ativo = True
+                    st.session_state.ultimo_tempo = time.time()
+
+                elif st.session_state.timer_ativo:
+                    tempo_passado = time.time() - st.session_state.ultimo_tempo
+                    tempo_restante = max(0, tempo_entre_lotes - int(tempo_passado))
+                    contagem_regressiva(tempo_restante)
+                    if tempo_restante == 0:
+                        st.session_state.timer_ativo = False
 
         if st.session_state.indice_lote >= total:
             st.success("🎉 Validação concluída!")
 
-# Aba 2: Dashboard
+# --- Aba 2: Dashboard ---
 with aba2:
     st.subheader("📊 Dashboard de Situação dos CNPJs")
 
@@ -279,7 +301,7 @@ with aba2:
         ax_rf.axis("equal")
         st.pyplot(fig_rf, use_container_width=True)
 
-# Aba 3: Histórico
+# --- Aba 3: Histórico ---
 with aba3:
     st.subheader("📦 Histórico de empresas validadas")
 
@@ -301,7 +323,7 @@ with aba3:
         else:
             st.info("Nenhum dado encontrado no período selecionado.")
 
-# Aba 4: CRM Simplificado
+# --- Aba 4: CRM Simplificado ---
 with aba4:
     st.subheader("🗂 CRM Simplificado")
 
@@ -329,6 +351,9 @@ with aba4:
             "proximo_contato": proximo_contato.strftime("%Y-%m-%d") if proximo_contato else "",
         })
 
+    if "crm_atualizado" not in st.session_state:
+        st.session_state["crm_atualizado"] = False
+
     st.markdown('<div class="crm-container">', unsafe_allow_html=True)
     colunas = st.columns(len(status_list), gap="medium")
 
@@ -354,26 +379,30 @@ with aba4:
                     if st.button("⬅️", key=f"voltar_{empresa['id']}") and status != status_list[0]:
                         idx = status_list.index(status)
                         atualizar_status(empresa["id"], status_list[idx - 1])
-                        st.session_state["needs_rerun"] = True
+                        st.session_state["crm_atualizado"] = True
                 with col_move[2]:
                     if st.button("➡️", key=f"avancar_{empresa['id']}") and status != status_list[-1]:
                         idx = status_list.index(status)
                         atualizar_status(empresa["id"], status_list[idx + 1])
-                        st.session_state["needs_rerun"] = True
+                        st.session_state["crm_atualizado"] = True
+
                 notas = st.text_area("Notas", value=empresa['crm_notas'], key=f"notas_{empresa['id']}")
                 data_contato = st.date_input(
                     "Próximo contato",
                     value=pd.to_datetime(empresa['proximo_contato']).date() if empresa['proximo_contato'] else date.today(),
                     key=f"data_{empresa['id']}"
                 )
+
                 if st.button("Salvar", key=f"salvar_{empresa['id']}"):
                     salvar_notas(empresa["id"], notas, data_contato)
                     st.success("Atualizado!")
-                    st.session_state["needs_rerun"] = True
+                    st.session_state["crm_atualizado"] = True
+
                 st.markdown("---")
+
     st.markdown('</div>', unsafe_allow_html=True)
 
-if st.session_state.get("needs_rerun", False):
-    st.session_state["needs_rerun"] = False
-    st.experimental_rerun()
-
+    if st.session_state["crm_atualizado"]:
+        if st.button("🔄 Atualizar CRM para ver alterações"):
+            st.session_state["crm_atualizado"] = False
+            st.experimental_rerun()
