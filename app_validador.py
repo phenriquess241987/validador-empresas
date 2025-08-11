@@ -243,12 +243,12 @@ with aba3:
                     if st.button("⬅️", key=f"voltar_{empresa['id']}") and status != status_list[0]:
                         idx = status_list.index(status)
                         atualizar_status(empresa["id"], status_list[idx-1])
-                        st.experimental_rerun()
+                        st.session_state["needs_rerun"] = True
                 with col_move[2]:
                     if st.button("➡️", key=f"avancar_{empresa['id']}") and status != status_list[-1]:
                         idx = status_list.index(status)
                         atualizar_status(empresa["id"], status_list[idx+1])
-                        st.experimental_rerun()
+                        st.session_state["needs_rerun"] = True
                 notas = st.text_area("Notas", value=empresa['crm_notas'], key=f"notas_{empresa['id']}")
                 data_contato = st.date_input(
                     "Próximo contato",
@@ -258,5 +258,9 @@ with aba3:
                 if st.button("Salvar", key=f"salvar_{empresa['id']}"):
                     salvar_notas(empresa["id"], notas, data_contato)
                     st.success("Atualizado!")
-                    st.experimental_rerun()
+                    st.session_state["needs_rerun"] = True
                 st.markdown("---")
+
+    if st.session_state.get("needs_rerun", False):
+        st.session_state["needs_rerun"] = False
+        st.experimental_rerun()
