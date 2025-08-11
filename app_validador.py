@@ -8,19 +8,6 @@ import io
 from openpyxl import Workbook
 from datetime import date
 
-# 🔐 Autenticação simples
-def autenticar():
-    st.sidebar.title("🔐 Login")
-    senha = st.sidebar.text_input("Digite a senha", type="password")
-    if senha == st.secrets["auth"]["senha"]:
-        return True
-    else:
-        st.sidebar.warning("Senha incorreta.")
-        return False
-
-if not autenticar():
-    st.stop()
-
 # 🔌 Conectar ao banco Neon via secrets
 conn = psycopg2.connect(st.secrets["database"]["url"])
 cursor = conn.cursor()
