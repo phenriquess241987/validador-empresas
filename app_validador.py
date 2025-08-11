@@ -5,7 +5,6 @@ import time
 import psycopg2
 import io
 from datetime import date
-from streamlit_sortables import sortables
 
 # --- Conexão com banco ---
 conn = psycopg2.connect(st.secrets["database"]["url"])
@@ -27,7 +26,8 @@ def inicializar_banco():
     );
     """)
     conn.commit()
-    # Adicionar colunas que possam faltar (exemplo: caso tenha tabela mas falte colunas)
+
+    # Adiciona colunas que possam faltar
     for coluna, tipo, default in [
         ("crm_status", "TEXT", "'Prospect'"),
         ("crm_notas", "TEXT", "NULL"),
@@ -70,8 +70,8 @@ def contagem_regressiva(segundos):
         time.sleep(1)
 
 # --- Configuração da página ---
-st.set_page_config(page_title="Validador + CRM Kanban", layout="wide")
-st.title("🔍 Validador de CNPJs + CRM Kanban")
+st.set_page_config(page_title="Validador + CRM Simplificado", layout="wide")
+st.title("🔍 Validador de CNPJs + CRM Simplificado")
 
 aba1, aba2, aba3 = st.tabs(["📤 Validação", "📊 Dashboard", "📦 Histórico / CRM"])
 
@@ -190,14 +190,12 @@ with aba2:
     else:
         st.info("Nenhum dado encontrado.")
 
-# --- Aba 3: Histórico / CRM Kanban ---
+# --- Aba 3: Histórico / CRM Simplificado ---
 with aba3:
-    st.subheader("📦 Histórico / CRM Kanban")
+    st.subheader("📦 Histórico / CRM Simplificado")
 
-    # Status fixos (Kanban)
     status_list = ["Prospect", "Em Negociação", "Cliente", "Perdido"]
 
-    # Pegar todas as empresas do banco
     cursor.execute("""
         SELECT id, cnpj, nome, telefone, situacao_rf, crm_status, crm_notas, proximo_contato 
         FROM empresas
@@ -205,14 +203,12 @@ with aba3:
     """)
     empresas = cursor.fetchall()
 
-    # Organizar por status
     empresas_por_status = {status: [] for status in status_list}
-    id_to_empresa = {}
     for e in empresas:
         id_, cnpj, nome, telefone, situacao_rf, crm_status, crm_notas, proximo_contato = e
         if crm_status not in status_list:
             crm_status = "Prospect"
-        card = {
+        empresas_por_status[crm_status].append({
             "id": id_,
             "cnpj": cnpj,
             "nome": nome,
@@ -220,70 +216,47 @@ with aba3:
             "situacao_rf": situacao_rf,
             "crm_notas": crm_notas or "",
             "proximo_contato": proximo_contato.strftime("%Y-%m-%d") if proximo_contato else "",
-        }
-        empresas_por_status[crm_status].append(card)
-        id_to_empresa[id_] = card
-
-    # Função para salvar atualizações
-    def salvar_empresa(id_, notas, proximo_contato):
-        cursor.execute("""
-            UPDATE empresas SET crm_notas=%s, proximo_contato=%s WHERE id=%s
-        """, (notas, proximo_contato if proximo_contato != "" else None, id_))
-        conn.commit()
-
-    def alterar_status(id_, novo_status):
-        cursor.execute("""
-            UPDATE empresas SET crm_status=%s WHERE id=%s
-        """, (novo_status, id_))
-        conn.commit()
-
-    # Mostrar cards no kanban com streamlit-sortables
-    colunas_kanban = []
-    for status in status_list:
-        colunas_kanban.append({
-            "id": status,
-            "title": status,
-            "cards": empresas_por_status[status]
         })
 
-    # Componente kanban (drag & drop)
-    kanban = sortables(
-        colunas_kanban,
-        direction="horizontal",
-        key="kanban_empresas",
-        item_renderer=lambda card: f"{card['nome']} ({card['cnpj']})\nTelefone: {card['telefone']}\nSituação RF: {card['situacao_rf']}"
-    )
+    col1, col2, col3, col4 = st.columns(4)
+    colunas = [col1, col2, col3, col4]
 
-    # Detectar mudanças no kanban e salvar status no banco
-    if kanban:
-        # kanban = lista de colunas com cards atualizados após drag & drop
-        # para cada coluna, atualizar status
-        for coluna in kanban:
-            status_coluna = coluna["id"]
-            for card in coluna["cards"]:
-                id_ = card["id"]
-                if id_to_empresa[id_]["crm_status"] != status_coluna:
-                    alterar_status(id_, status_coluna)
-                    id_to_empresa[id_]["crm_status"] = status_coluna
+    def atualizar_status(id_, novo_status):
+        cursor.execute("UPDATE empresas SET crm_status=%s WHERE id=%s", (novo_status, id_))
+        conn.commit()
 
-    st.markdown("---")
-
-    # Selecionar cliente para editar notas e próxima data contato
-    st.markdown("### ✏️ Editar notas e próxima data de contato")
-    cnpj_para_editar = st.selectbox("Selecione o CNPJ do cliente", options=[f"{c['cnpj']} - {c['nome']}" for c in empresas])
-    if cnpj_para_editar:
-        cnpj_selecionado = cnpj_para_editar.split(" - ")[0]
+    def salvar_notas(id_, notas, data_contato):
         cursor.execute("""
-            SELECT id, crm_notas, proximo_contato FROM empresas WHERE cnpj = %s
-        """, (cnpj_selecionado,))
-        res = cursor.fetchone()
-        if res:
-            id_edit, notas_edit, proximo_edit = res
-            notas_edit = notas_edit or ""
-            proximo_edit = proximo_edit or date.today()
-            novas_notas = st.text_area("Notas", value=notas_edit, key="notas_edit")
-            nova_data = st.date_input("Próxima data de contato", value=proximo_edit, key="data_edit")
-            if st.button("💾 Salvar alterações", key="salvar_edit"):
-                salvar_empresa(id_edit, novas_notas, nova_data)
-                st.success("Informações atualizadas!")
+            UPDATE empresas SET crm_notas=%s, proximo_contato=%s WHERE id=%s
+        """, (notas, data_contato if data_contato else None, id_))
+        conn.commit()
 
+    for i, status in enumerate(status_list):
+        with colunas[i]:
+            st.markdown(f"### {status} ({len(empresas_por_status[status])})")
+            for empresa in empresas_por_status[status]:
+                st.markdown(f"**{empresa['nome']}** ({empresa['cnpj']})")
+                st.write(f"Telefone: {empresa['telefone']}")
+                st.write(f"Situação RF: {empresa['situacao_rf']}")
+                col_move = st.columns([1,2,1])
+                with col_move[0]:
+                    if st.button("⬅️", key=f"voltar_{empresa['id']}") and status != status_list[0]:
+                        idx = status_list.index(status)
+                        atualizar_status(empresa["id"], status_list[idx-1])
+                        st.experimental_rerun()
+                with col_move[2]:
+                    if st.button("➡️", key=f"avancar_{empresa['id']}") and status != status_list[-1]:
+                        idx = status_list.index(status)
+                        atualizar_status(empresa["id"], status_list[idx+1])
+                        st.experimental_rerun()
+                notas = st.text_area("Notas", value=empresa['crm_notas'], key=f"notas_{empresa['id']}")
+                data_contato = st.date_input(
+                    "Próximo contato",
+                    value=pd.to_datetime(empresa['proximo_contato']).date() if empresa['proximo_contato'] else date.today(),
+                    key=f"data_{empresa['id']}"
+                )
+                if st.button("Salvar", key=f"salvar_{empresa['id']}"):
+                    salvar_notas(empresa["id"], notas, data_contato)
+                    st.success("Atualizado!")
+                    st.experimental_rerun()
+                st.markdown("---")
