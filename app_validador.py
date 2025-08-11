@@ -308,7 +308,7 @@ with aba4:
     st.subheader("🗂 CRM Simplificado")
 
     # Auto refresh a cada 30 segundos
-    count = st_autorefresh(interval=30 * 1000, limit=None, key="crm_autorefresh")
+    count = st_autorefresh(interval=15 * 1000, limit=None, key="crm_autorefresh")
 
     # Aviso para atualizar manualmente
     st.markdown("⚠️ **A página será atualizada automaticamente a cada 30 segundos. Você também pode atualizar manualmente clicando no botão abaixo:**")
@@ -392,3 +392,4 @@ with aba4:
                 st.markdown("---")
 
     st.markdown('</div>', unsafe_allow_html=True)
+
