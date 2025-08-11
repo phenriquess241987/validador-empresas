@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import io
 from openpyxl import Workbook
 from datetime import date
+from st_aggrid import AgGrid, GridOptionsBuilder
 
 # 🔌 Conectar ao banco Neon via secrets
 conn = psycopg2.connect(st.secrets["database"]["url"])
@@ -43,12 +44,12 @@ def consultar_cnpj(cnpj):
 
 # 🖥️ Interface com abas
 st.title("🔍 Validador de CNPJs com ReceitaWS + Banco Neon")
-aba1, aba2, aba3 = st.tabs(["📤 Validação", "📊 Dashboard", "📦 Histórico"])
+aba1, aba2, aba3 = st.tabs(["📤 Validação", "📊 Dashboard", "📦 Histórico (CRM Visual)"])
 
+# 📤 Aba 1 – Validação
 with aba1:
     st.subheader("📤 Validação de CNPJs")
 
-    # 🔹 Instruções e planilha modelo
     st.markdown("### 📎 Baixe a planilha modelo para garantir o formato correto")
     st.markdown("A planilha deve conter as colunas: **CNPJ**, **Nome**, **Telefone**")
 
@@ -69,9 +70,7 @@ with aba1:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-    # 🔹 Upload da planilha do usuário
     arquivo = st.file_uploader("📄 Envie sua planilha com CNPJs, Nomes e Telefones", type=["xlsx", "csv"])
-
     colunas_esperadas = ["CNPJ", "Nome", "Telefone"]
 
     if "df_validacao" not in st.session_state:
@@ -82,24 +81,19 @@ with aba1:
     if arquivo and st.session_state.df_validacao is None:
         df = pd.read_excel(arquivo) if arquivo.name.endswith(".xlsx") else pd.read_csv(arquivo)
 
-        # ✅ Validação da estrutura
         if all(col in df.columns for col in colunas_esperadas):
             erros = []
-
-            # 🔍 Verificação de formato e duplicidade
             df["CNPJ"] = df["CNPJ"].astype(str).str.replace(r"\D", "", regex=True)
             df["Telefone"] = df["Telefone"].astype(str)
 
             for i, row in df.iterrows():
                 cnpj = row["CNPJ"]
                 telefone = row["Telefone"]
-
                 if not cnpj.isdigit() or len(cnpj) != 14:
                     erros.append(f"Linha {i+2}: CNPJ inválido ({cnpj})")
                 if len(''.join(filter(str.isdigit, telefone))) < 10:
                     erros.append(f"Linha {i+2}: Telefone inválido ({telefone})")
 
-            # 🚫 Verificar duplicidade de CNPJs
             duplicados = df[df.duplicated(subset=["CNPJ"], keep=False)]
             if not duplicados.empty:
                 erros.append("⚠️ CNPJs duplicados encontrados:")
@@ -166,6 +160,7 @@ with aba1:
         if st.session_state.indice_lote >= total:
             st.success("🎉 Validação concluída!")
 
+# 📊 Aba 2 – Dashboard
 with aba2:
     st.subheader("📊 Dashboard de Situação dos CNPJs")
 
@@ -186,13 +181,10 @@ with aba2:
     else:
         st.info("Nenhum dado encontrado no banco ainda.")
 
-with aba3:
-    from st_aggrid import AgGrid, GridOptionsBuilder
-
+# 📦 Aba 3 – CRM Visual
 with aba3:
     st.subheader("📦 CRM Visual - Histórico de registros")
 
-    # 🔍 Filtros avançados
     st.markdown("### 🔎 Filtros")
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -208,7 +200,6 @@ with aba3:
     with col5:
         data_fim = st.date_input("📅 Data final", value=date.today())
 
-    # 🔎 Buscar registros filtrados
     cursor.execute("""
         SELECT cnpj, nome, telefone, situacao_rf, created_at
         FROM empresas
@@ -220,33 +211,7 @@ with aba3:
     if dados:
         df_banco = pd.DataFrame(dados, columns=["CNPJ", "Nome", "Telefone", "Situação RF", "Data"])
 
-        # Aplicar filtros adicionais
         if nome_filtro:
             df_banco = df_banco[df_banco["Nome"].str.contains(nome_filtro, case=False, na=False)]
         if cnpj_filtro:
-            df_banco = df_banco[df_banco["CNPJ"].str.contains(cnpj_filtro, na=False)]
-        if situacao_filtro:
-            df_banco = df_banco[df_banco["Situação RF"] == situacao_filtro]
-
-        # 📊 Tabela interativa com AgGrid
-        st.markdown("### 📋 Resultados")
-        gb = GridOptionsBuilder.from_dataframe(df_banco)
-        gb.configure_pagination()
-        gb.configure_default_column(groupable=True, value=True, editable=False)
-        grid_options = gb.build()
-
-        AgGrid(df_banco, gridOptions=grid_options, height=400, theme="material")
-
-        # 📥 Exportação
-        st.markdown("### 📤 Exportar dados filtrados")
-        csv = df_banco.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Baixar como CSV", data=csv, file_name="empresas_filtradas.csv", mime="text/csv")
-
-        excel_buffer = io.BytesIO()
-        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-            df_banco.to_excel(writer, index=False, sheet_name="Empresas")
-        st.download_button("📥 Baixar como Excel", data=excel_buffer.getvalue(),
-                           file_name="empresas_filtradas.xlsx",
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    else:
-        st.info("Nenhum dado encontrado nesse intervalo.")
+           
