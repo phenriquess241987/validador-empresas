@@ -6,6 +6,7 @@ import psycopg2
 import io
 from datetime import date
 import matplotlib.pyplot as plt
+from streamlit_autorefresh import st_autorefresh  # Import para autorefresh
 
 # --- CSS para fixar abas no topo, ajustar tema escuro e CRM ---
 st.markdown(
@@ -306,13 +307,15 @@ with aba3:
 with aba4:
     st.subheader("🗂 CRM Simplificado")
 
+    # Auto refresh a cada 30 segundos
+    count = st_autorefresh(interval=30 * 1000, limit=None, key="crm_autorefresh")
+
     # Aviso para atualizar manualmente
-    st.markdown("⚠️ **Para ver as alterações, atualize a página clicando no botão abaixo:**")
+    st.markdown("⚠️ **A página será atualizada automaticamente a cada 30 segundos. Você também pode atualizar manualmente clicando no botão abaixo:**")
 
     col_top = st.columns([4,1])
     with col_top[1]:
         if st.button("🔄 Atualizar CRM"):
-            st.session_state["crm_atualizado"] = False
             st.experimental_rerun()
 
     status_list = ["Prospect", "Em Negociação", "Cliente", "Perdido"]
@@ -345,8 +348,6 @@ with aba4:
     st.markdown('<div class="crm-container">', unsafe_allow_html=True)
     colunas = st.columns(len(status_list), gap="medium")
 
-    precisa_rerun = False
-
     def atualizar_status(id_, novo_status):
         cursor.execute("UPDATE empresas SET crm_status=%s WHERE id=%s", (novo_status, id_))
         conn.commit()
@@ -369,12 +370,12 @@ with aba4:
                     if st.button("⬅️", key=f"voltar_{empresa['id']}") and status != status_list[0]:
                         idx = status_list.index(status)
                         atualizar_status(empresa["id"], status_list[idx - 1])
-                        precisa_rerun = True
+                        st.session_state["crm_atualizado"] = True
                 with col_move[2]:
                     if st.button("➡️", key=f"avancar_{empresa['id']}") and status != status_list[-1]:
                         idx = status_list.index(status)
                         atualizar_status(empresa["id"], status_list[idx + 1])
-                        precisa_rerun = True
+                        st.session_state["crm_atualizado"] = True
 
                 notas = st.text_area("Notas", value=empresa['crm_notas'], key=f"notas_{empresa['id']}")
                 data_contato = st.date_input(
@@ -386,11 +387,8 @@ with aba4:
                 if st.button("Salvar", key=f"salvar_{empresa['id']}"):
                     salvar_notas(empresa["id"], notas, data_contato)
                     st.success("Atualizado!")
-                    precisa_rerun = True
+                    st.session_state["crm_atualizado"] = True
 
                 st.markdown("---")
 
     st.markdown('</div>', unsafe_allow_html=True)
-
-    if precisa_rerun:
-        st.experimental_rerun()
