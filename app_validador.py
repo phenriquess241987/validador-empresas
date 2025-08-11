@@ -1,46 +1,46 @@
 import streamlit as st
 import pandas as pd
-from urllib.parse import quote
+import requests
+import time
 
-st.set_page_config(page_title="Validador de Empresas", page_icon="📇", layout="centered")
+# Função para consultar CNPJ na ReceitaWS
+def consultar_cnpj(cnpj):
+    cnpj = ''.join(filter(str.isdigit, str(cnpj)))
+    url = f"https://www.receitaws.com.br/v1/cnpj/{cnpj}"
+    headers = {"Accept": "application/json"}
+    
+    try:
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            dados = response.json()
+            return dados.get("situacao", "Não encontrado")
+        else:
+            return f"Erro {response.status_code}"
+    except Exception as e:
+        return f"Erro: {str(e)}"
 
-st.image("logo.png", width=120)
-st.title("📇 Validador de Empresas")
-st.markdown("Envie sua planilha e gere links personalizados de WhatsApp para cada empresa.")
-
-# Upload da planilha
-arquivo = st.file_uploader("📤 Envie sua planilha (.xlsx)", type=["xlsx"])
+# Interface Streamlit
+st.title("🔍 Validador de CNPJs com ReceitaWS")
+arquivo = st.file_uploader("📄 Envie sua planilha com CNPJs", type=["xlsx", "csv"])
 
 if arquivo:
-    df = pd.read_excel(arquivo)
+    df = pd.read_excel(arquivo) if arquivo.name.endswith(".xlsx") else pd.read_csv(arquivo)
+    st.write("📋 Empresas carregadas:", df.shape[0])
+    
+    if st.button("🚀 Iniciar validação em tempo real"):
+        resultados = []
+        total = len(df)
+        for i in range(0, total, 3):
+            lote = df.iloc[i:i+3]
+            for idx, row in lote.iterrows():
+                cnpj = row["CNPJ"]
+                situacao = consultar_cnpj(cnpj)
+                resultados.append({"CNPJ": cnpj, "Situação": situacao})
+                st.write(f"✅ {cnpj}: {situacao}")
+            
+            st.info(f"⏳ Aguardando 3 minutos para o próximo lote...")
+            time.sleep(180)  # Espera 3 minutos
 
-    # Verifica se colunas obrigatórias existem
-    colunas_necessarias = {"Nome", "CNPJ", "Telefone", "Situação"}
-    if not colunas_necessarias.issubset(df.columns):
-        st.error("A planilha deve conter as colunas: Nome, CNPJ, Telefone, Situação")
-    else:
-        # Filtro por situação
-        situacoes = df["Situação"].unique()
-        filtro = st.selectbox("🔍 Filtrar por situação", options=["Todas"] + list(situacoes))
-
-        if filtro != "Todas":
-            df = df[df["Situação"] == filtro]
-
-        # Mensagem personalizada
-        mensagem_base = st.text_input("✉️ Mensagem para WhatsApp", 
-            value="Olá, {nome}! Temos uma proposta especial para sua empresa.")
-
-        # Geração dos links
-        def gerar_link(telefone, nome):
-            numero = ''.join(filter(str.isdigit, str(telefone)))
-            texto = mensagem_base.replace("{nome}", nome)
-            return f"https://wa.me/{numero}?text={quote(texto)}"
-
-        df["Link WhatsApp"] = df.apply(lambda row: gerar_link(row["Telefone"], row["Nome"]), axis=1)
-
-        st.success("✅ Links gerados com sucesso!")
-        st.dataframe(df)
-
-        # Botão de download
-        csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Baixar resultados", data=csv, file_name="empresas_com_links.csv", mime="text/csv")
+        st.success("🎉 Validação concluída!")
+        resultado_df = pd.DataFrame(resultados)
+        st.dataframe(resultado_df)
