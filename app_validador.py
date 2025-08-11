@@ -212,14 +212,4 @@ with aba3:
         df_banco = pd.DataFrame(dados, columns=["CNPJ", "Nome", "Telefone", "Situação RF", "Data"])
 
         if nome_filtro:
-            df_banco = df_banco[df_banco["Nome"].str.contains(nome_filtro, case=False, na=False)]
-        if cnpj_filtro:
-            df_banco = df_banco[df_banco["CNPJ"].str.contains(cnpj_filtro, na=False)]
-        if situacao_filtro:
-            df_banco = df_banco[df_banco["Situação RF"] == situacao_filtro]
-
-        st.markdown("### 📋 Resultados")
-        gb = GridOptionsBuilder.from_dataframe(df_banco)
-        gb.configure_pagination()
-        gb.configure_default_column(groupable=True, value=True, editable
-
+            df_banco = df_banco[df_banco["Nome"].str.contains(nome_filtro
